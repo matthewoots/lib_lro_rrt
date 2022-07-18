@@ -53,7 +53,6 @@ using namespace std::chrono;
 
 namespace tbborrt_server
 {
-    
 
     class tbborrt_server_node
     {
@@ -70,6 +69,7 @@ namespace tbborrt_server
 
             vector<Node*> nodes;
             bool reached = false;
+            int iteration;
             std::random_device dev;
             
             /** 
@@ -80,17 +80,19 @@ namespace tbborrt_server
             * @param _runtime_error,second() = _runtime_error = The overall timeout before we close the program 
             * @param _octree = pcl converted octree class
             **/
-            double _protected_zone;
+            double _protected_zone, _resolution;
             std::pair<double,double> _runtime_error; // Consist of _sub_runtime_error and _runtime_error
             std::pair<double,double> _height_constrain; // Consist of _min_height and _max_height
             pcl::octree::OctreePointCloud<pcl::PointXYZ> _octree  = decltype(_octree)(0.1);
+            pcl::PointCloud<pcl::PointXYZ>::VectorType occupied_voxels;
 
 
             /** 
             * @brief Parameters for the local map expansion size in the RRT module
             * @param _sensor_range = Sensor range that will affect the _buffer value 
             **/
-            double _sensor_range;
+            double _sensor_range, _sensor_buffer;
+            bool _goal_within_sensory_bounds;
             vector<Eigen::Vector4d> _no_fly_zone;
 
             Eigen::Affine3d global_to_vector_transform;
@@ -99,9 +101,9 @@ namespace tbborrt_server
 
             inline double separation(Eigen::Vector3d p, Eigen::Vector3d q) {return (p - q).norm();}
 
-            inline void search_single_node();
+            void search_single_node(Node start, Node end);
 
-            inline bool check_line_validity(Eigen::Vector3d p, Eigen::Vector3d q);
+            bool check_line_validity(Eigen::Vector3d p, Eigen::Vector3d q);
 
             inline Eigen::Quaterniond quaternion_from_pitch_yaw(
                 Eigen::Vector3d v1, Eigen::Vector3d v2)
@@ -155,10 +157,12 @@ namespace tbborrt_server
                     down = *(down.parent);
                 }
 
-                std::vector<Eigen::Vector3d> reordered_path = get_reorder_path(path, start);
-                std::vector<Eigen::Vector3d> shortened_path = get_shorten_path(reordered_path);
+                // std::vector<Eigen::Vector3d> reordered_path = get_reorder_path(path, start);
+                // std::vector<Eigen::Vector3d> shortened_path = get_shorten_path(reordered_path);
 
-                return shortened_path;
+                // return shortened_path;
+
+                return path;
             }
 
             inline std::vector<Eigen::Vector3d> get_reorder_path(
@@ -197,6 +201,7 @@ namespace tbborrt_server
             tbborrt_server_node(double resolution)
             {
                 _octree.setResolution(resolution);
+                _resolution = resolution;
             }
 
             /** @brief Destructor of the rrt_server node**/ 
@@ -209,11 +214,12 @@ namespace tbborrt_server
             * @param previous_input = The previous input found that is reusable in the search
             * @param start_end = Original frame start and end position in the search
             **/ 
-            inline vector<Eigen::Vector3d> find_path(
-                vector<Eigen::Vector3d> previous_input, std::pair<Eigen::Vector3d,Eigen::Vector3d> start_end);
+            vector<Eigen::Vector3d> find_path(
+                vector<Eigen::Vector3d> previous_input, 
+                std::pair<Eigen::Vector3d, Eigen::Vector3d> start_end);
 
             /** @brief set the parameters for the search **/ 
-            inline void set_parameters(double protected_zone, 
+            void set_parameters(double protected_zone, 
                 vector<Eigen::Vector4d> no_fly_zone,
                 std::pair<double,double> runtime_error, 
                 std::pair<double,double> height_constrain,
@@ -227,12 +233,13 @@ namespace tbborrt_server
                 _sensor_range = sensor_range;
             }
 
-            inline void update_octree(pcl::PointCloud<pcl::PointXYZ>::Ptr obs_pcl)
+            void update_octree(pcl::PointCloud<pcl::PointXYZ>::Ptr obs_pcl)
             {
                 std::lock_guard<std::mutex> octree_lock(octree_mutex);
                 _octree.deleteTree();
                 _octree.setInputCloud(obs_pcl);
                 _octree.addPointsFromInputCloud();
+                // int occupied_points = _octree.getOccupiedVoxelCenters(occupied_voxels);
             }
 
     };
