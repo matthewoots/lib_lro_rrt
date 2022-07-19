@@ -50,19 +50,20 @@ namespace tbborrt_server
         // Setup global_to_vector_transform transform
         global_to_vector_transform = Affine3d::Identity(); 
         
-        global_to_vector_transform.rotate(q.inverse());
+        global_to_vector_transform.rotate(q);
         global_to_vector_transform.translate(-start_end.first);
 
-        // Initialize variables for RRT
+        // Initialize variables for RRT (reset)
         nodes.clear();
-        Node start_node;
-        Node end_node;
 
         start_node.position = start_end.first;
         start_node.parent = NULL;
+        start_node.children.clear();
 
         nodes.push_back(&start_node);
         end_node.position = start_end.second;
+        end_node.parent = NULL;
+        end_node.children.clear();
 
         // The buffer for the xyz search area determined by _sensor_range
         double buffer_factor = 2.0;
@@ -73,8 +74,8 @@ namespace tbborrt_server
         Eigen::Vector3d transformed_end = transform_vector_with_affine(
             start_end.second, global_to_vector_transform);
 
-        std::cout << "transformed_start = " << transformed_start.transpose() << 
-            " transformed_end = " << transformed_end.transpose() << std::endl;
+        std::cout << "transformed_start = " << KBLU << transformed_start.transpose() << KNRM << 
+            " transformed_end = " << KBLU << transformed_end.transpose() << KNRM << std::endl;
 
         _goal_within_sensory_bounds = translational_difference_distance - _sensor_buffer < 0;
         
@@ -90,13 +91,20 @@ namespace tbborrt_server
             while(!reached)
             {
                 time_point<std::chrono::system_clock> search_timer = system_clock::now();
-                search_single_node(start_node, end_node);
+                search_single_node();
+
+                /** @brief Debug message **/
                 // std::cout << "    search time = " << duration<double>(system_clock::now() - search_timer).count()*1000 << "ms" << std::endl;
+                
                 if (duration<double>(system_clock::now() - fail_sub_timer).count() > _runtime_error.first)
                 {
                     break;
                 }
+                iteration++;
             }
+
+            /** @brief Debug message **/
+            std::cout << "Sub-iterations taken = " << iteration << std::endl;
             
             if (reached)
                 break;
@@ -109,10 +117,10 @@ namespace tbborrt_server
 
         std::cout << "Search complete with " << nodes.size() << " nodes" << std::endl;
 
-        return path_extraction(start_node, end_node);
+        return path_extraction();
     }
 
-    void tbborrt_server_node::search_single_node(Node start, Node end)
+    void tbborrt_server_node::search_single_node()
     {
         std::mt19937 generator(dev());
         
@@ -120,17 +128,27 @@ namespace tbborrt_server
         std::uniform_real_distribution<double> dis_middle(-_sensor_buffer, _sensor_buffer);
 
         Node* step_node = new Node;
-        Eigen::Vector3d transformed_random_vector = 
-            Eigen::Vector3d(dis_middle(generator), dis_middle(generator), dis_middle(generator));
 
+        bool collision = true;
+        Eigen::Vector3d transformed_random_vector, random_vector;
+        while (collision)
+        {
+            transformed_random_vector = 
+                Eigen::Vector3d(dis_middle(generator), dis_middle(generator), dis_middle(generator));
+            random_vector = transform_vector_with_affine(
+                transformed_random_vector, global_to_vector_transform.inverse());
+            pcl::PointXYZ point;
+            point.x = random_vector.x();
+            point.y = random_vector.y();
+            point.z = random_vector.z();
+            if (!_octree.isVoxelOccupiedAtPoint(point))
+                collision = false;
+        }
         double transformed_random_vector_distance = transformed_random_vector.norm();
-        
-        Eigen::Vector3d random_vector = transform_vector_with_affine(
-            transformed_random_vector, global_to_vector_transform.inverse());
 
         step_node->position = random_vector;
 
-        int index = get_nearest_node(*step_node, start);
+        int index = get_nearest_node(*step_node, start_node);
 
         // Clamp z axis
         random_vector.z() = max(min(random_vector.z(), _height_constrain.second), _height_constrain.first);
@@ -148,6 +166,7 @@ namespace tbborrt_server
                                 
         }
 
+        /** @brief Debug message **/
         // std::cout << "Random_node = " << random_vector.transpose() << std::endl;
 
         bool flag = check_line_validity(
@@ -162,12 +181,12 @@ namespace tbborrt_server
         nodes[index]->children.push_back(step_node);
 
         if ((transformed_random_vector_distance > _sensor_buffer && random_vector.x() > 0) ||
-            check_line_validity(end.position, step_node->position))
+            check_line_validity(end_node.position, step_node->position))
         {
             reached = true;
-            end.parent = step_node;
-            nodes.push_back(&end);
-            (nodes[nodes.size()-1]->children).push_back(&end);
+            end_node.parent = step_node;
+            nodes.push_back(&end_node);
+            (nodes[nodes.size()-1]->children).push_back(&end_node);
             return;
         }
         else
@@ -185,6 +204,10 @@ namespace tbborrt_server
         Eigen::Vector3f q_f = Eigen::Vector3f((float)q.x(), (float)q.y(), (float)q.z());
         int voxels = (int)_octree.getApproxIntersectedVoxelCentersBySegment(p_f, q_f, voxels_in_line_search, precision);
         int intersects = 0;
+
+        /** @brief Debug message **/
+        // std::cout << "    voxel_size = " << voxels_in_line_search.size() << std::endl;
+        
         for (int i = 0; i < voxels_in_line_search.size(); i++)
         {
             if (_octree.isVoxelOccupiedAtPoint(voxels_in_line_search[i]))

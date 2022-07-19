@@ -14,7 +14,7 @@ file(GLOB INCLUDE_FILES "include/*.h")
 file(GLOB SRC_FILES "src/*.cpp")
 
 find_package(Eigen3 REQUIRED)
-find_package(PCL REQUIRED COMPONENTS common octree)
+find_package(PCL REQUIRED COMPONENTS common octree filters)
 include_directories(
     ${EIGEN3_INCLUDE_DIRS} 
     ${PCL_INCLUDE_DIRS}

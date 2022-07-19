@@ -21,6 +21,12 @@
  * 
  * 
  */
+/* 
+* Some Documentations
+* https://pointclouds.org/documentation/classpcl_1_1octree_1_1_octree_point_cloud.html
+* https://pcl.readthedocs.io/projects/tutorials/en/latest/octree.html
+* https://github.com/otherlab/pcl/blob/master/test/octree/test_octree.cpp 
+*/
 
 #ifndef TBBORRT_SERVER_H
 #define TBBORRT_SERVER_H
@@ -67,6 +73,9 @@ namespace tbborrt_server
                 Eigen::Vector3d position;
             };
 
+            Node start_node;
+            Node end_node;
+
             vector<Node*> nodes;
             bool reached = false;
             int iteration;
@@ -101,7 +110,7 @@ namespace tbborrt_server
 
             inline double separation(Eigen::Vector3d p, Eigen::Vector3d q) {return (p - q).norm();}
 
-            void search_single_node(Node start, Node end);
+            void search_single_node();
 
             bool check_line_validity(Eigen::Vector3d p, Eigen::Vector3d q);
 
@@ -141,11 +150,11 @@ namespace tbborrt_server
                 return transformed_pose.translation();
             }
 
-            inline std::vector<Eigen::Vector3d> path_extraction(Node start, Node end)
+            std::vector<Eigen::Vector3d> path_extraction()
             {
                 Node up, down;
-                down = end;
-                up = *(end.parent);
+                down = end_node;
+                up = *(end_node.parent);
                 std::vector<Eigen::Vector3d> path;
 
                 while(1)
@@ -157,19 +166,18 @@ namespace tbborrt_server
                     down = *(down.parent);
                 }
 
-                // std::vector<Eigen::Vector3d> reordered_path = get_reorder_path(path, start);
-                // std::vector<Eigen::Vector3d> shortened_path = get_shorten_path(reordered_path);
+                std::vector<Eigen::Vector3d> reordered_path = get_reorder_path(path);
+                std::vector<Eigen::Vector3d> shortened_path = get_shorten_path(reordered_path);
 
-                // return shortened_path;
-
-                return path;
+                return shortened_path;
+                // return path;
             }
 
             inline std::vector<Eigen::Vector3d> get_reorder_path(
-                std::vector<Eigen::Vector3d> path, Node start)
+                std::vector<Eigen::Vector3d> path)
             {
                 std::vector<Eigen::Vector3d> reordered_path;
-                reordered_path.push_back(start.position);
+                reordered_path.push_back(start_node.position);
                 for (int i = (int)path.size()-1; i >= 0; i--)
                     reordered_path.push_back(path[i]);            
 
