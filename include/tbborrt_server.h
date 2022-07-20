@@ -42,7 +42,9 @@
 
 #include <pcl/point_types.h>
 #include <pcl/point_cloud.h>
-#include <pcl/octree/octree.h>
+
+// #include <pcl/octree/octree.h>
+#include <pcl/octree/octree_search.h>
 
 using namespace Eigen;
 using namespace std;
@@ -92,10 +94,13 @@ namespace tbborrt_server
             double _protected_zone, _resolution;
             std::pair<double,double> _runtime_error; // Consist of _sub_runtime_error and _runtime_error
             std::pair<double,double> _height_constrain; // Consist of _min_height and _max_height
-            pcl::octree::OctreePointCloud<pcl::PointXYZ> _octree  = decltype(_octree)(0.1);
-            pcl::PointCloud<pcl::PointXYZ>::VectorType occupied_voxels;
+            pcl::octree::OctreePointCloudSearch<pcl::PointXYZ> _octree  = decltype(_octree)(0.1);
+            pcl::PointCloud<pcl::PointXYZ>::VectorType _occupied_voxels;
+            int _occupied_points;
+            pcl::PointCloud<pcl::PointXYZ>::Ptr _store_cloud;
+            Eigen::Vector3d min_bnd, max_bnd;
 
-
+            
             /** 
             * @brief Parameters for the local map expansion size in the RRT module
             * @param _sensor_range = Sensor range that will affect the _buffer value 
@@ -203,6 +208,20 @@ namespace tbborrt_server
                 return shortened_path;
             }
 
+            inline bool point_within_octree(Eigen::Vector3d point)
+            {
+                // Check octree boundary
+                if (point.x() < max_bnd.x() - _resolution/2 && 
+                    point.x() > min_bnd.x() + _resolution/2 &&
+                    point.y() < max_bnd.y() - _resolution/2 && 
+                    point.y() > min_bnd.y() + _resolution/2 &&
+                    point.z() < max_bnd.z() - _resolution/2 && 
+                    point.z() > min_bnd.z() + _resolution/2)
+                    return true;
+                else
+                    return false;
+            } 
+
         public:
 
             /** @brief Constructor of the rrt_server node**/ 
@@ -247,7 +266,14 @@ namespace tbborrt_server
                 _octree.deleteTree();
                 _octree.setInputCloud(obs_pcl);
                 _octree.addPointsFromInputCloud();
-                // int occupied_points = _octree.getOccupiedVoxelCenters(occupied_voxels);
+                
+                _store_cloud = obs_pcl;
+                _occupied_points = _octree.getOccupiedVoxelCenters(_occupied_voxels);
+                
+                _octree.getBoundingBox(min_bnd.x(), min_bnd.y(), min_bnd.z(),
+                    max_bnd.x(), max_bnd.y(), max_bnd.z());
+                std::cout << "Minimum Boundary = " << KBLU << min_bnd.transpose() << KNRM << " " << 
+                    "Maximum Boundary = " << KBLU << max_bnd.transpose() << KNRM << std::endl;
             }
 
     };

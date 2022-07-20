@@ -110,7 +110,7 @@ namespace tbborrt_server
                 break;
         }
         std::cout << (reached ? "Successful" : "Unsuccessful") << " search complete after " << 
-            duration<double>(system_clock::now() - fail_timer).count() << "s" << std::endl;
+            duration<double>(system_clock::now() - fail_timer).count()*1000 << "ms" << std::endl;
         
         if (!reached)
             return std::vector<Vector3d>();
@@ -129,21 +129,40 @@ namespace tbborrt_server
 
         Node* step_node = new Node;
 
-        bool collision = true;
+        
         Eigen::Vector3d transformed_random_vector, random_vector;
-        while (collision)
+
+        if (_occupied_points > 0) // When there are points in the cloud
+        {
+            while (1)
+            {
+                pcl::PointXYZ point;
+
+                transformed_random_vector = 
+                    Eigen::Vector3d(dis_middle(generator), dis_middle(generator), dis_middle(generator));
+                random_vector = transform_vector_with_affine(
+                    transformed_random_vector, global_to_vector_transform.inverse());             
+
+                // Check octree boundary
+                if (!point_within_octree(random_vector))
+                    break;
+                
+                point.x = random_vector.x();
+                point.y = random_vector.y();
+                point.z = random_vector.z();
+                    
+                if (!_octree.isVoxelOccupiedAtPoint(point))
+                    break;
+            }
+        }
+        else // When there is no points in the cloud
         {
             transformed_random_vector = 
                 Eigen::Vector3d(dis_middle(generator), dis_middle(generator), dis_middle(generator));
             random_vector = transform_vector_with_affine(
                 transformed_random_vector, global_to_vector_transform.inverse());
-            pcl::PointXYZ point;
-            point.x = random_vector.x();
-            point.y = random_vector.y();
-            point.z = random_vector.z();
-            if (!_octree.isVoxelOccupiedAtPoint(point))
-                collision = false;
         }
+
         double transformed_random_vector_distance = transformed_random_vector.norm();
 
         step_node->position = random_vector;
@@ -198,21 +217,96 @@ namespace tbborrt_server
     bool tbborrt_server_node::check_line_validity(
         Eigen::Vector3d p, Eigen::Vector3d q)
     {
-        float precision = (float)_resolution;
-        pcl::PointCloud<pcl::PointXYZ>::VectorType voxels_in_line_search;
-        Eigen::Vector3f p_f = Eigen::Vector3f((float)p.x(), (float)p.y(), (float)p.z());
-        Eigen::Vector3f q_f = Eigen::Vector3f((float)q.x(), (float)q.y(), (float)q.z());
-        int voxels = (int)_octree.getApproxIntersectedVoxelCentersBySegment(p_f, q_f, voxels_in_line_search, precision);
-        int intersects = 0;
+        if (_occupied_points == 0)
+            return true;
 
-        /** @brief Debug message **/
-        // std::cout << "    voxel_size = " << voxels_in_line_search.size() << std::endl;
+        /** @brief Method 1 **/
+        // float precision = (float)_resolution/2;
+        // pcl::PointCloud<pcl::PointXYZ>::VectorType voxels_in_line_search;
+        // Eigen::Vector3f p_f = Eigen::Vector3f((float)p.x(), (float)p.y(), (float)p.z());
+        // Eigen::Vector3f q_f = Eigen::Vector3f((float)q.x(), (float)q.y(), (float)q.z());
         
-        for (int i = 0; i < voxels_in_line_search.size(); i++)
+        // Eigen::Vector3d direction = (q-p) / (q-p).norm();
+
+        // // Make sure that doing getApproxIntersectedVoxelCentersBySegment is within the octree boundary
+        // if (!point_within_octree(p))
+        // {
+
+        // }
+
+        // if (!point_within_octree(q))
+        // {
+            
+        // }
+
+        // int voxels = (int)_octree.getApproxIntersectedVoxelCentersBySegment(p_f, q_f, voxels_in_line_search, precision);
+        // int intersects = 0;
+
+        // /** @brief Debug message **/
+        // // std::cout << "    voxel_size = " << voxels_in_line_search.size() << std::endl;
+        
+        // for (int i = 0; i < voxels_in_line_search.size(); i++)
+        // {
+        //     // Check octree boundary
+        //     if (!point_within_octree(Eigen::Vector3d(
+        //         voxels_in_line_search[i].x, 
+        //         voxels_in_line_search[i].y, 
+        //         voxels_in_line_search[i].z)))
+        //         continue;
+
+        //     if (_octree.isVoxelOccupiedAtPoint(voxels_in_line_search[i]))
+        //         return false;
+        // }
+        /** @brief End of Method 1 **/
+        
+
+        /** @brief Method 2 **/
+        pcl::PointXYZ search_point, end_point, obstacle_point;
+        double accumulated_distance = 0;
+        search_point.x = p.x();
+        search_point.y = p.y();
+        search_point.z = p.z();
+
+        end_point.x = p.x();
+        end_point.y = q.y();
+        end_point.z = q.z();
+
+        double distance_target = (q-p).norm();
+        Eigen::Vector3d direction_vector = (q-p) / (q-p).norm();
+
+        while (accumulated_distance - distance_target < 0)
         {
-            if (_octree.isVoxelOccupiedAtPoint(voxels_in_line_search[i]))
-                return false;
+            // K nearest neighbor search
+            int K = 1;
+
+            std::vector<int> pointIdxNKNSearch;
+            std::vector<float> pointNKNSquaredDistance;
+
+            time_point<std::chrono::system_clock> timer = system_clock::now();
+            if (_octree.nearestKSearch (search_point, K, pointIdxNKNSearch, pointNKNSquaredDistance) > 0)
+            {
+                obstacle_point = (*_store_cloud)[pointIdxNKNSearch[0]];
+                float distance = sqrtf(pointNKNSquaredDistance[0]);
+                Eigen::Vector3d distance_travelled = direction_vector * distance_target;
+                
+                search_point.x = distance_travelled.x() + search_point.x;
+                search_point.y = distance_travelled.y() + search_point.y;
+                search_point.z = distance_travelled.z() + search_point.z;
+                 
+                accumulated_distance += (double)distance; 
+
+                Eigen::Vector3d d = 
+                    Eigen::Vector3d(obstacle_point.x, obstacle_point.y, obstacle_point.z) -
+                    Eigen::Vector3d(search_point.x, search_point.y, search_point.z);
+                std::cout << "    d.norm() = " << d.norm() << " " 
+                    << " accumulated_distance/distance_target = " << accumulated_distance << " / "
+                    << distance_target <<  " time-taken = " 
+                    << duration<double>(system_clock::now() - timer).count()*1000 << "ms" << std::endl;
+                if (d.norm() < _resolution * 1.5)
+                    return false;
+            }
         }
+        /** @brief End of Method 2 **/
 
         return true;
     }

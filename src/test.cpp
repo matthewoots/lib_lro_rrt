@@ -26,6 +26,7 @@
 #include <pcl/filters/crop_box.h>
 #include <cmath>
 #include <random>
+#include <thread>
 
 #define KNRM  "\033[0m"
 #define KRED  "\033[31m"
@@ -37,6 +38,8 @@
 #define KWHT  "\033[37m"
 
 using namespace tbborrt_server;
+using namespace std::this_thread; // sleep_for, sleep_until
+using namespace std::chrono; // nanoseconds, system_clock, seconds
 
 int main()
 {
@@ -47,8 +50,8 @@ int main()
     std::pair<double,double> height_constrain{0.0, 5.0};
     std::pair<double,double> runtime_error{0.020, 0.10};
     double sensor_range = 4.0;
-    double protected_zone = 0.25;
-    double pointcloud_resolution = 0.15;
+    double protected_zone = 0.3;
+    double pointcloud_resolution = 0.2;
     vector<Eigen::Vector4d> no_fly_zone;
     vector<Eigen::Vector3d> previous_input;
     pcl::PointCloud<pcl::PointXYZ>::Ptr obs_pcl (new pcl::PointCloud<pcl::PointXYZ>());
@@ -61,10 +64,13 @@ int main()
 
     // Generate pointcloud data and produce AA cubes as obstacles
     int obstacle_count = 10;
-    double cube_size = 2.5;
+    double cube_size = 5.0;
     int divisions = (int)(cube_size / pointcloud_resolution);
     int point_counts = pow(divisions, 3);
-    double divisions_interval = cube_size / divisions;
+    double divisions_interval = cube_size / (double)divisions;
+    std::cout << "divisions = " << divisions << " " << 
+        "point_counts = " << point_counts << " " << 
+        "divisions_interval = " << divisions_interval << std::endl;
 
     obs_pcl->width = obstacle_count * point_counts;
     obs_pcl->height = 1;
@@ -133,7 +139,7 @@ int main()
                     obs_pcl->points[(int)i].x - end.x(), 
                     obs_pcl->points[(int)i].y - end.y(), 
                     obs_pcl->points[(int)i].z - end.z());
-                if (start_diff.norm() < protected_zone * 3 || end_diff.norm() < protected_zone * 3)
+                if (start_diff.norm() < protected_zone * 1.5 || end_diff.norm() < protected_zone * 1.5 )
                     break;
             }
 
@@ -141,7 +147,6 @@ int main()
                 break;
         }
         
-        time_point<std::chrono::system_clock> time = system_clock::now();
         std::cout << "start_position = " << KBLU << start.transpose() << KNRM << " " <<
                     "end_position = " << KBLU << end.transpose() << KNRM << " " <<
                     "distance = " << KBLU << (start-end).norm() << KNRM << std::endl;
@@ -168,6 +173,8 @@ int main()
 
         rrt.update_octree(output);
 
+
+        time_point<std::chrono::system_clock> time = system_clock::now();
         std::pair<Eigen::Vector3d, Eigen::Vector3d> start_end;
         start_end.first = start;
         start_end.second = end;
@@ -194,6 +201,8 @@ int main()
         
         iteration++;
         std::cout << std::endl;
+
+        sleep_for(seconds(1));
     }
 
     return 0;
