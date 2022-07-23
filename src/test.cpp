@@ -60,7 +60,7 @@ int main()
     std::uniform_real_distribution<double> dis_height(height_constrain.first, height_constrain.second);
 
     double resolution = protected_zone;
-    tbborrt_server::tbborrt_server_node rrt(resolution);
+    tbborrt_server::tbborrt_server_node rrt;
 
     // Generate pointcloud data and produce AA cubes as obstacles
     int obstacle_count = 10;
@@ -114,7 +114,7 @@ int main()
         std::cout << "Iteration " << KBLU << iteration << KNRM << std::endl;
 
         rrt.set_parameters(protected_zone, no_fly_zone, 
-            runtime_error, height_constrain, sensor_range);
+            runtime_error, height_constrain, sensor_range, resolution);
 
         bool start_end_not_valid = true;
         Eigen::Vector3d start, end;

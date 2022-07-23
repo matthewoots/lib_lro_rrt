@@ -117,8 +117,6 @@ namespace tbborrt_server
 
             void search_single_node();
 
-            bool check_line_validity(Eigen::Vector3d p, Eigen::Vector3d q);
-
             inline Eigen::Quaterniond quaternion_from_pitch_yaw(
                 Eigen::Vector3d v1, Eigen::Vector3d v2)
             {
@@ -225,17 +223,15 @@ namespace tbborrt_server
         public:
 
             /** @brief Constructor of the rrt_server node**/ 
-            tbborrt_server_node(double resolution)
-            {
-                _octree.setResolution(resolution);
-                _resolution = resolution;
-            }
+            tbborrt_server_node(){}
 
             /** @brief Destructor of the rrt_server node**/ 
             ~tbborrt_server_node()
             {
                 _octree.deleteTree();
             }
+
+            bool check_line_validity(Eigen::Vector3d p, Eigen::Vector3d q);
 
             /** @brief Main run module for the rrt_server node
             * @param previous_input = The previous input found that is reusable in the search
@@ -250,7 +246,8 @@ namespace tbborrt_server
                 vector<Eigen::Vector4d> no_fly_zone,
                 std::pair<double,double> runtime_error, 
                 std::pair<double,double> height_constrain,
-                double sensor_range)
+                double sensor_range,
+                double resolution)
             {
                 _no_fly_zone.clear();
                 _no_fly_zone = no_fly_zone;
@@ -258,6 +255,9 @@ namespace tbborrt_server
                 _height_constrain = height_constrain;
                 _runtime_error = runtime_error;
                 _sensor_range = sensor_range;
+
+                _octree.setResolution(resolution);
+                _resolution = resolution;
             }
 
             void update_octree(pcl::PointCloud<pcl::PointXYZ>::Ptr obs_pcl)
