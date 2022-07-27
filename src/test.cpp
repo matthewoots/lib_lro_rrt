@@ -171,7 +171,7 @@ int main()
             output->points.size() << KNRM << " / " << 
             KBLU << obs_pcl->points.size() << KNRM << std::endl;
 
-        rrt.update_octree(output);
+        rrt.update_octree(output, start, end);
 
 
         time_point<std::chrono::system_clock> time = system_clock::now();
@@ -196,7 +196,7 @@ int main()
             KGRN << time_duration*1000 << KNRM << "ms" << std::endl;
 
         /** @brief Debug message **/
-        for (int i = 0; i < search.size(); i++)
+        for (int i = 0; i < (int)search.size(); i++)
             std::cout << "    node " << i << " = " << search[i].transpose() << std::endl;
         
         iteration++;

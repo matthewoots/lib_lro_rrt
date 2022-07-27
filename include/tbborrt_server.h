@@ -91,7 +91,7 @@ namespace tbborrt_server
             * @param _runtime_error,second() = _runtime_error = The overall timeout before we close the program 
             * @param _octree = pcl converted octree class
             **/
-            double _protected_zone, _resolution;
+            double _protected_zone, _resolution, _buffer_factor;
             std::pair<double,double> _runtime_error; // Consist of _sub_runtime_error and _runtime_error
             std::pair<double,double> _height_constrain; // Consist of _min_height and _max_height
             pcl::octree::OctreePointCloudSearch<pcl::PointXYZ> _octree  = decltype(_octree)(0.1);
@@ -120,22 +120,65 @@ namespace tbborrt_server
             inline Eigen::Quaterniond quaternion_from_pitch_yaw(
                 Eigen::Vector3d v1, Eigen::Vector3d v2)
             {
+
+                // https://github.com/toji/gl-matrix/blob/f0583ef53e94bc7e78b78c8a24f09ed5e2f7a20c/src/gl-matrix/quat.js#L54
+                // Eigen::Vector3d xUnitVec3 = Eigen::Vector3d(1,0,0);
+                // Eigen::Vector3d yUnitVec3 = Eigen::Vector3d(0,1,0);
+                // double dot = v1.x()*v2.x() + 
+                //     v1.y()*v2.y() + v1.z()*v2.z();
+
+                // Eigen::Quaterniond q;
+
+                // if (dot < -0.999999)
+                // {
+                //     Eigen::Vector3d tmpvec3 = xUnitVec3.cross(v1);
+                //     if (tmpvec3.norm() < 0.000001)
+                //         tmpvec3 = yUnitVec3.cross(v1);
+                //     Eigen::Vector3d axis = tmpvec3.normalized();
+                //     Eigen::Matrix3d m;
+                //     m = AngleAxisd(axis.x()*M_PI, Vector3d::UnitX())
+                //         * AngleAxisd(axis.y()*M_PI, Vector3d::UnitY())
+                //         * AngleAxisd(axis.z()*M_PI, Vector3d::UnitZ());
+
+                //     Eigen::Quaterniond n_q(m);
+                //     q = n_q;
+                //     q.normalized();
+                // }
+                // else if (dot > 0.999999) {
+                //     q.x() = 0;
+                //     q.y() = 0;
+                //     q.z() = 0;
+                //     q.w() = 1;
+                // }
+                // else 
+                // {
+                //     Eigen::Vector3d tmpvec3 = v1.cross(v2);
+                //     q.x() = tmpvec3.x();
+                //     q.y() = tmpvec3.y();
+                //     q.z() = tmpvec3.z();
+                //     q.w() = 1 + dot;
+                //     q.normalized();
+                // }
+
                 // https://stackoverflow.com/questions/1171849/finding-quaternion-representing-the-rotation-from-one-vector-to-another
                 // dot_product check
-                Eigen::Quaterniond q = Eigen::Quaterniond::Identity();
-                if (v1.x()*v2.x() + 
-                    v1.y()*v2.y() + v1.z()*v2.z() > 0.999999)
-                    return q;
+                // Eigen::Quaterniond q = Eigen::Quaterniond::Identity();
+                // if (v1.x()*v2.x() + 
+                //     v1.y()*v2.y() + v1.z()*v2.z() > 0.999999)
+                //     return q;
 
-                if (v1.x()*v2.x() + 
-                    v1.y()*v2.y() + v1.z()*v2.z() < -0.999999)
-                    return q;
+                // if (v1.x()*v2.x() + 
+                //     v1.y()*v2.y() + v1.z()*v2.z() < -0.999999)
+                //     return q;
 
-                Eigen::Vector3d a = v2.cross(v1);
-                q.vec() = Vector3d(a.x(), a.y(), a.z());
-                q.w() = sqrt(pow(v1.norm(),2) * pow(v2.norm(),2)) + 
-                    v1.x()*v2.x() + v1.y()*v2.y() + v1.z()*v2.z();
-                q.normalize();
+                // Eigen::Vector3d a = v1.cross(v2);
+                // q.vec() = Vector3d(a.x(), a.y(), a.z());
+                // q.w() = sqrt(pow(v1.norm(),2) * pow(v2.norm(),2)) + 
+                //     v1.x()*v2.x() + v1.y()*v2.y() + v1.z()*v2.z();
+                // q.normalize();
+
+                Eigen::Quaterniond q = 
+                    Eigen::Quaterniond::FromTwoVectors(v1.normalized(), v2.normalized());
 
                 return q;
             }
@@ -147,8 +190,7 @@ namespace tbborrt_server
                 Eigen::Affine3d pose(Affine3d::Identity());
                 pose.translation() = p;
 
-                Eigen::Affine3d transformed_pose = 
-                    global_to_vector_transform * pose;   
+                Eigen::Affine3d transformed_pose = t * pose;   
 
                 return transformed_pose.translation();
             }
@@ -172,6 +214,9 @@ namespace tbborrt_server
                 std::vector<Eigen::Vector3d> reordered_path = get_reorder_path(path);
                 std::vector<Eigen::Vector3d> shortened_path = get_shorten_path(reordered_path);
 
+                for (int i = 0; i < (int)reordered_path.size(); i++)
+                    std::cout << KCYN << reordered_path[i].transpose() << KNRM << std::endl;
+
                 return shortened_path;
                 // return path;
             }
@@ -192,13 +237,13 @@ namespace tbborrt_server
             {
                 std::vector<Eigen::Vector3d> shortened_path;
                 shortened_path.push_back(path[0]);
+
                 for (int i = 1; i < (int)path.size(); i++)
                 {
                     if (!check_line_validity(
-                        path[i], shortened_path[(int)shortened_path.size()-1]))
-                    {
-                        i--;          
-                        shortened_path.push_back(path[i]);
+                        shortened_path[(int)shortened_path.size()-1], path[i]))
+                    {        
+                        shortened_path.push_back(path[i-1]);
                     }
                 }   
                 shortened_path.push_back(path[path.size()-1]);      
@@ -258,20 +303,59 @@ namespace tbborrt_server
 
                 _octree.setResolution(resolution);
                 _resolution = resolution;
+
+                _buffer_factor = 1.5;
+                // The buffer for the xyz search area determined by _sensor_range
+                _sensor_buffer = _buffer_factor * _sensor_range;
             }
 
-            void update_octree(pcl::PointCloud<pcl::PointXYZ>::Ptr obs_pcl)
+            void update_octree(
+                pcl::PointCloud<pcl::PointXYZ>::Ptr obs_pcl,
+                Eigen::Vector3d p,
+                Eigen::Vector3d q)
             {
                 std::lock_guard<std::mutex> octree_lock(octree_mutex);
+
+                double boundary_buffer = 1.0 * _sensor_buffer;
+                // Get boundary defined by p and q that is including buffer
+                // double max_x_arg = max(p.x()+boundary_buffer, q.x()+boundary_buffer);
+                // double min_x_arg = min(p.x()-boundary_buffer, q.x()-boundary_buffer);
+                
+                // double max_y_arg = max(p.y()+boundary_buffer, q.y()+boundary_buffer);
+                // double min_y_arg = min(p.y()-boundary_buffer, q.y()-boundary_buffer);
+                
+                // double max_z_arg = max(p.z()+boundary_buffer, q.z()+boundary_buffer);
+                // double min_z_arg = min(p.z()-boundary_buffer, q.z()-boundary_buffer);
+
+                 double max_x_arg = p.x() + boundary_buffer;
+                double min_x_arg = p.x() - boundary_buffer;
+                
+                double max_y_arg = p.y() + boundary_buffer;
+                double min_y_arg = p.y() - boundary_buffer;
+
+                double max_z_arg = _height_constrain.second + _sensor_buffer;
+                double min_z_arg = _height_constrain.first - _sensor_buffer;
+
+                /** @brief Debug message **/
+                // std::cout << "Boundaries = " << max_x_arg << " " << min_x_arg << " " << 
+                //     max_y_arg << " " << min_y_arg << " " << 
+                //     max_z_arg << " " << min_z_arg << std::endl;
+
                 _octree.deleteTree();
+                _octree.defineBoundingBox(min_x_arg, min_y_arg, min_z_arg,
+                    max_x_arg, max_y_arg, max_z_arg);
                 _octree.setInputCloud(obs_pcl);
                 _octree.addPointsFromInputCloud();
+                /** @brief Debug message **/
+                std::cout << "Pointcloud size = " << KBLU << 
+                    obs_pcl->points.size() << KNRM << std::endl;
                 
                 _store_cloud = obs_pcl;
                 _occupied_points = _octree.getOccupiedVoxelCenters(_occupied_voxels);
                 
                 _octree.getBoundingBox(min_bnd.x(), min_bnd.y(), min_bnd.z(),
                     max_bnd.x(), max_bnd.y(), max_bnd.z());
+                /** @brief Debug message **/
                 std::cout << "Minimum Boundary = " << KBLU << min_bnd.transpose() << KNRM << " " << 
                     "Maximum Boundary = " << KBLU << max_bnd.transpose() << KNRM << std::endl;
             }

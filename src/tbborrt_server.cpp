@@ -48,10 +48,22 @@ namespace tbborrt_server
             Vector3d(1,0,0), translational_difference_vec);
 
         // Setup global_to_vector_transform transform
-        global_to_vector_transform = Affine3d::Identity(); 
-        
-        global_to_vector_transform.rotate(q);
+        global_to_vector_transform = Eigen::Affine3d::Identity(); 
+        // global_to_vector_transform.linear() = q.inverse().toRotationMatrix();
+        global_to_vector_transform.rotate(q.inverse());
         global_to_vector_transform.translate(-start_end.first);
+
+        // Eigen::Affine3d test_transform = Eigen::Affine3d::Identity(); 
+        // test_transform.linear() = q.toRotationMatrix();
+        // test_transform.translate(start_end.first);
+        // test_transform.rotate(q);
+
+        // std::cout << "affineMatrixTest1 = " << std::endl << 
+        //     KBLU << global_to_vector_transform.inverse().rotation() << std::endl <<
+        //     KBLU << global_to_vector_transform.inverse().translation() << std::endl <<
+        //     KNRM << "affineMatrixTest2 = "  << std::endl << 
+        //     KBLU << test_transform.rotation() << KNRM << std::endl <<
+        //     KBLU << test_transform.translation() << KNRM << std::endl;
 
         // Initialize variables for RRT (reset)
         nodes.clear();
@@ -65,17 +77,23 @@ namespace tbborrt_server
         end_node.parent = NULL;
         end_node.children.clear();
 
-        // The buffer for the xyz search area determined by _sensor_range
-        double buffer_factor = 2.0;
-        _sensor_buffer = buffer_factor * _sensor_range;
+        // Eigen::Vector3d transformed_start = transform_vector_with_affine(
+        //     start_end.first, global_to_vector_transform);
+        // Eigen::Vector3d transformed_end = transform_vector_with_affine(
+        //     start_end.second, global_to_vector_transform);
 
-        Eigen::Vector3d transformed_start = transform_vector_with_affine(
-            start_end.first, global_to_vector_transform);
-        Eigen::Vector3d transformed_end = transform_vector_with_affine(
-            start_end.second, global_to_vector_transform);
+        /** @brief Debug message **/
+        // std::cout << "transformed_start = " << KBLU << transformed_start.transpose() << KNRM << 
+        //     " transformed_end = " << KBLU << transformed_end.transpose() << KNRM << std::endl;
 
-        std::cout << "transformed_start = " << KBLU << transformed_start.transpose() << KNRM << 
-            " transformed_end = " << KBLU << transformed_end.transpose() << KNRM << std::endl;
+        // Eigen::Vector3d original_start = transform_vector_with_affine(
+        //     transformed_start, global_to_vector_transform.inverse());
+        // Eigen::Vector3d original_end = transform_vector_with_affine(
+        //     transformed_end, global_to_vector_transform.inverse());
+
+        /** @brief Debug message **/
+        // std::cout << "original_start = " << KBLU << original_start.transpose() << KNRM << 
+        //     " original_end = " << KBLU << original_end.transpose() << KNRM << std::endl;
 
         _goal_within_sensory_bounds = translational_difference_distance - _sensor_buffer < 0;
         
@@ -90,7 +108,7 @@ namespace tbborrt_server
 
             while(!reached)
             {
-                time_point<std::chrono::system_clock> search_timer = system_clock::now();
+                // time_point<std::chrono::system_clock> search_timer = system_clock::now();
                 search_single_node();
 
                 /** @brief Debug message **/
@@ -126,6 +144,7 @@ namespace tbborrt_server
         
         // Setup bounds
         std::uniform_real_distribution<double> dis_middle(-_sensor_buffer, _sensor_buffer);
+        std::uniform_real_distribution<double> dis_height(_height_constrain.first, _height_constrain.second);
 
         Node* step_node = new Node;
 
@@ -139,9 +158,12 @@ namespace tbborrt_server
                 pcl::PointXYZ point;
 
                 transformed_random_vector = 
-                    Eigen::Vector3d(dis_middle(generator), dis_middle(generator), dis_middle(generator));
+                    Eigen::Vector3d(dis_middle(generator) + _sensor_buffer/2, dis_middle(generator), dis_middle(generator));
                 random_vector = transform_vector_with_affine(
                     transformed_random_vector, global_to_vector_transform.inverse());             
+
+                // Clamp z axis
+                random_vector.z() = dis_height(generator);
 
                 // Check octree boundary
                 if (!point_within_octree(random_vector))
@@ -158,9 +180,11 @@ namespace tbborrt_server
         else // When there is no points in the cloud
         {
             transformed_random_vector = 
-                Eigen::Vector3d(dis_middle(generator), dis_middle(generator), dis_middle(generator));
+                Eigen::Vector3d(dis_middle(generator) + _sensor_buffer/2, dis_middle(generator), dis_middle(generator));
             random_vector = transform_vector_with_affine(
                 transformed_random_vector, global_to_vector_transform.inverse());
+            // Clamp z axis
+            random_vector.z() = dis_height(generator);
         }
 
         double transformed_random_vector_distance = transformed_random_vector.norm();
@@ -168,9 +192,6 @@ namespace tbborrt_server
         step_node->position = random_vector;
 
         int index = get_nearest_node(*step_node, start_node);
-
-        // Clamp z axis
-        random_vector.z() = max(min(random_vector.z(), _height_constrain.second), _height_constrain.first);
 
         for (int i = 0; i < (int)_no_fly_zone.size(); i++)
         {
@@ -189,7 +210,7 @@ namespace tbborrt_server
         // std::cout << "Random_node = " << random_vector.transpose() << std::endl;
 
         bool flag = check_line_validity(
-            step_node->position, nodes[index]->position);
+            nodes[index]->position, step_node->position);
         
         if(!flag)
             return;
@@ -199,8 +220,8 @@ namespace tbborrt_server
         nodes.push_back(step_node);
         nodes[index]->children.push_back(step_node);
 
-        if ((transformed_random_vector_distance > _sensor_buffer && random_vector.x() > 0) ||
-            check_line_validity(end_node.position, step_node->position))
+        if ((transformed_random_vector_distance > _sensor_buffer && transformed_random_vector.x() > 0) ||
+            check_line_validity(step_node->position, end_node.position))
         {
             reached = true;
             end_node.parent = step_node;
@@ -220,94 +241,197 @@ namespace tbborrt_server
         if (_occupied_points == 0)
             return true;
 
-        /** @brief Method 1 **/
-        // float precision = (float)_resolution/2;
-        // pcl::PointCloud<pcl::PointXYZ>::VectorType voxels_in_line_search;
-        // Eigen::Vector3f p_f = Eigen::Vector3f((float)p.x(), (float)p.y(), (float)p.z());
-        // Eigen::Vector3f q_f = Eigen::Vector3f((float)q.x(), (float)q.y(), (float)q.z());
-        
-        // Eigen::Vector3d direction = (q-p) / (q-p).norm();
-
-        // // Make sure that doing getApproxIntersectedVoxelCentersBySegment is within the octree boundary
-        // if (!point_within_octree(p))
-        // {
-
-        // }
-
-        // if (!point_within_octree(q))
-        // {
+        /** @brief Debug message **/
+        // std::cout << "p = " << KGRN << p.transpose() << KNRM << 
+        //     " q = " << KGRN << q.transpose() << KNRM << std::endl;
             
-        // }
+        /** @brief Method 1 **/
+        Eigen::Vector3d translational_difference = q - p;
 
-        // int voxels = (int)_octree.getApproxIntersectedVoxelCentersBySegment(p_f, q_f, voxels_in_line_search, precision);
-        // int intersects = 0;
+        Eigen::Vector3d translational_difference_vec = 
+            translational_difference / translational_difference.norm();
+        Eigen::Quaterniond quat = quaternion_from_pitch_yaw(
+            Vector3d(1,0,0), translational_difference_vec);
 
-        // /** @brief Debug message **/
-        // // std::cout << "    voxel_size = " << voxels_in_line_search.size() << std::endl;
+        // Setup vector transform
+        Eigen::Affine3d vector_transform = Eigen::Affine3d::Identity(); 
+        vector_transform.rotate(quat.inverse());
+        vector_transform.translate(-p);
         
-        // for (int i = 0; i < voxels_in_line_search.size(); i++)
-        // {
-        //     // Check octree boundary
-        //     if (!point_within_octree(Eigen::Vector3d(
-        //         voxels_in_line_search[i].x, 
-        //         voxels_in_line_search[i].y, 
-        //         voxels_in_line_search[i].z)))
-        //         continue;
+        Eigen::Vector3d t_p = transform_vector_with_affine(p, vector_transform);        
+        Eigen::Vector3d t_q = transform_vector_with_affine(q, vector_transform);
 
-        //     if (_octree.isVoxelOccupiedAtPoint(voxels_in_line_search[i]))
-        //         return false;
-        // }
+        /** @brief Debug message **/
+        // std::cout << "t_p = " << KGRN << t_p.transpose() << KNRM << 
+        //     " t_q = " << KGRN << t_q.transpose() << KNRM << std::endl;
+
+        vector<std::pair<Eigen::Vector3d,Eigen::Vector3d>> query_pairs;
+
+        int expansion = 0;
+
+        // Create a transformed discretized plane
+        for (int i = 0; i < 1 + expansion * 2; i++)
+        {
+            for (int j = 0; j < 1 + expansion * 2; j++)
+            {
+                for (int k = 0; k < 1 + expansion * 2; k++)
+                {
+                    std::pair<Eigen::Vector3d,Eigen::Vector3d> point_pair;
+                    point_pair.first = Eigen::Vector3d(
+                        t_p.x() - _resolution * expansion + i*_resolution,
+                        t_p.y() - _resolution * expansion + j*_resolution,
+                        t_p.z() - _resolution * expansion + k*_resolution
+                    );
+                    point_pair.second = Eigen::Vector3d(
+                        t_q.x() - _resolution * expansion + i*_resolution,
+                        t_q.y() - _resolution * expansion + j*_resolution,
+                        t_q.z() - _resolution * expansion + k*_resolution
+                    );
+
+                    /** @brief Debug message **/
+                    // std::cout << "_resolution = " << _resolution <<
+                    //     " point_pair.first = " << KBLU << point_pair.first.transpose() << KNRM << 
+                    //     " point_pair.second = " << KBLU << point_pair.second.transpose() << KNRM << std::endl;
+
+                    query_pairs.push_back(point_pair);
+                }
+            }
+        }
+
+
+        // Expand the voxel search to encompass a larger box-like area
+        for (int i = 0; i < (int)query_pairs.size(); i++)
+        {
+            float precision = (float)_resolution;
+            
+            /** @brief Debug message **/
+            // std::cout << "t_p1 = " << KCYN << query_pairs[i].first.transpose() << KNRM << 
+            //     " t_q1 = " << KCYN << query_pairs[i].second.transpose() << KNRM << std::endl;
+
+            Eigen::Vector3d o_p = transform_vector_with_affine(
+                query_pairs[i].first, vector_transform.inverse());
+            Eigen::Vector3d o_q = transform_vector_with_affine(
+                query_pairs[i].second, vector_transform.inverse());
+
+            /** @brief Debug message **/
+            // std::cout << "o_p = " << KRED << o_p.transpose() << KNRM << 
+            //     " o_q = " << KRED << o_q.transpose() << KNRM << std::endl;
+
+            pcl::PointCloud<pcl::PointXYZ>::VectorType voxels_in_line_search;
+            Eigen::Vector3f p_f = Eigen::Vector3f(
+                (float)o_p.x(), (float)o_p.y(), (float)o_p.z());
+            // Eigen::Vector3f q_f = Eigen::Vector3f(
+            //     (float)o_q.x(), (float)o_q.y(), (float)o_q.z());
+
+            double distance_target = (o_q-o_p).norm();
+            Eigen::Vector3d direction = (o_q-o_p).normalized();
+            double distance = precision * 2;
+            Eigen::Vector3d extension = distance * direction;
+            double accumulated_distance = 0;
+
+            Eigen::Vector3f q_f;
+            
+            Eigen::Vector3d query = o_p;
+            while (accumulated_distance - distance_target < 0)
+            {
+                query = query + extension;
+                /** @brief Debug message **/
+                // std::cout << "query = " << query.transpose() << std::endl;
+                if (!point_within_octree(query))
+                {
+                    query = query - extension;
+                    q_f = Eigen::Vector3f(
+                        (float)query.x(), (float)query.y(), 
+                        (float)query.z());
+                    break;
+                }
+
+                accumulated_distance += distance;
+            }
+
+            if (accumulated_distance > distance_target)
+                q_f = Eigen::Vector3f(
+                    (float)o_q.x(), (float)o_q.y(), (float)o_q.z());
+            
+
+            int voxels = (int)_octree.getApproxIntersectedVoxelCentersBySegment(
+                p_f, q_f, voxels_in_line_search, precision);
+
+            /** @brief Debug message **/
+            // std::cout << "    voxel_size = " << voxels_in_line_search.size() << std::endl;
+            
+            for (int j = 0; j < voxels; j++)
+            {
+                // Check octree boundary
+                if (!point_within_octree(Eigen::Vector3d(
+                    voxels_in_line_search[j].x, 
+                    voxels_in_line_search[j].y, 
+                    voxels_in_line_search[j].z)))
+                    continue;
+
+                if (_octree.isVoxelOccupiedAtPoint(voxels_in_line_search[j]))
+                    return false;
+            }
+        }
         /** @brief End of Method 1 **/
         
 
         /** @brief Method 2 **/
-        pcl::PointXYZ search_point, end_point, obstacle_point;
-        double accumulated_distance = 0;
-        search_point.x = p.x();
-        search_point.y = p.y();
-        search_point.z = p.z();
+        // pcl::PointXYZ search_point, end_point, obstacle_point;
+        // double accumulated_distance = 0;
+        // search_point.x = p.x();
+        // search_point.y = p.y();
+        // search_point.z = p.z();
 
-        end_point.x = p.x();
-        end_point.y = q.y();
-        end_point.z = q.z();
+        // end_point.x = p.x();
+        // end_point.y = q.y();
+        // end_point.z = q.z();
 
-        double distance_target = (q-p).norm();
-        Eigen::Vector3d direction_vector = (q-p) / (q-p).norm();
+        // double distance_target = (q-p).norm();
+        // Eigen::Vector3d direction_vector = (q-p) / (q-p).norm();
+        // int tries = 0, max_tries = 30;
 
-        while (accumulated_distance - distance_target < 0)
-        {
-            // K nearest neighbor search
-            int K = 1;
+        // while (accumulated_distance - distance_target < 0 && tries < max_tries)
+        // {
+        //     tries++;
+            
+        //     Eigen::Vector3d distance_travelled;
 
-            std::vector<int> pointIdxNKNSearch;
-            std::vector<float> pointNKNSquaredDistance;
+        //     time_point<std::chrono::system_clock> timer = system_clock::now();
+            
+        //     int index;
+        //     float sq_dist;
+            
+        //     _octree.approxNearestSearch(search_point, index, sq_dist);
 
-            time_point<std::chrono::system_clock> timer = system_clock::now();
-            if (_octree.nearestKSearch (search_point, K, pointIdxNKNSearch, pointNKNSquaredDistance) > 0)
-            {
-                obstacle_point = (*_store_cloud)[pointIdxNKNSearch[0]];
-                float distance = sqrtf(pointNKNSquaredDistance[0]);
-                Eigen::Vector3d distance_travelled = direction_vector * distance_target;
-                
-                search_point.x = distance_travelled.x() + search_point.x;
-                search_point.y = distance_travelled.y() + search_point.y;
-                search_point.z = distance_travelled.z() + search_point.z;
-                 
-                accumulated_distance += (double)distance; 
+        //     // Get the point in the pointcloud
+        //     obstacle_point = (*_store_cloud)[index];
+        //     float distance = sqrtf(sq_dist);
 
-                Eigen::Vector3d d = 
-                    Eigen::Vector3d(obstacle_point.x, obstacle_point.y, obstacle_point.z) -
-                    Eigen::Vector3d(search_point.x, search_point.y, search_point.z);
-                std::cout << "    d.norm() = " << d.norm() << " " 
-                    << " accumulated_distance/distance_target = " << accumulated_distance << " / "
-                    << distance_target <<  " time-taken = " 
-                    << duration<double>(system_clock::now() - timer).count()*1000 << "ms" << std::endl;
-                if (d.norm() < _resolution * 1.5)
-                    return false;
-            }
-        }
+        //     // Add the distance travelled to the accumulated distance
+        //     distance_travelled = direction_vector * distance;
+
+        //     accumulated_distance += (double)distance; 
+        //     std::cout << "    tries = " << tries
+        //         << " distance = " << distance << " " 
+        //         << " accumulated_distance/distance_target = " << accumulated_distance << " / "
+        //         << distance_target <<  " time-taken = " 
+        //         << duration<double>(system_clock::now() - timer).count()*1000 << "ms" << std::endl;
+            
+        //     if (distance < (float)_resolution * 1.5f)
+        //     {
+        //         accumulated_distance = pow(10,6);
+        //         std::cout << KRED << "Return on violation" << KNRM << std::endl;
+        //         return false;
+        //     }
+
+        //     search_point.x = distance_travelled.x() + search_point.x;
+        //     search_point.y = distance_travelled.y() + search_point.y;
+        //     search_point.z = distance_travelled.z() + search_point.z;
+        // }
         /** @brief End of Method 2 **/
 
+        // std::cout << KGRN << "Out of loop" << KNRM << std::endl;
         return true;
     }
 
