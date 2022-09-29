@@ -64,6 +64,103 @@ namespace tbborrt_server
 
     class tbborrt_server_node
     {
+        public:
+
+            /** 
+            * @brief Parameters for the RRT module performance
+            * @param height_constrain (h_c) The minimum and maximum height of the search
+            * @param protected_zone = Any protected zone to avoid considering waypoints inside
+            * @param runtime_error,first() = _sub_runtime_error = The timeout for each search in the module
+            * @param runtime_error,second() = _runtime_error = The overall timeout before we close the program 
+            * @param octree = pcl converted octree class
+            **/
+            struct parameters 
+            {
+                std::pair<Eigen::Vector3d, Eigen::Vector3d> s_e; // start and end pair
+                // @runtime_error : consist of _sub_runtime_error and _runtime_error
+                std::pair<double,double> r_e; 
+                // @height_constrain : consist of _min_height and _max_height
+                std::pair<double,double> h_c; 
+                double s_i; // @search_interval
+                double s_r; // @sensor_range
+                double p_z; // @protected_zone
+                double r; // @resolution
+                double m_s; // @map_size
+                double s_bf; // @sensor_buffer_factor
+                double s_b; // @sensor_buffer
+            };
+
+            /** @brief Constructor of the rrt_server node**/ 
+            tbborrt_server_node(){}
+
+            /** @brief Destructor of the rrt_server node**/ 
+            ~tbborrt_server_node()
+            {
+                _octree.deleteTree();
+            }
+
+            bool check_line_validity(Eigen::Vector3d p, Eigen::Vector3d q);
+
+            /** @brief Main run module for the rrt_server node
+            * @param previous_input = The previous input found that is reusable in the search
+            **/ 
+            vector<Eigen::Vector3d> find_path(vector<Eigen::Vector3d> previous_input);
+
+            /** @brief Setup the parameters for the search **/ 
+            void set_parameters(
+                parameters parameter, vector<Eigen::Vector4d> no_fly_zone)
+            {
+                // Write over the previous data
+                param = parameter;
+
+                _no_fly_zone.clear();
+                _no_fly_zone = no_fly_zone;
+                _octree.setResolution(param.r);
+
+                // The buffer for the xyz search area determined by the sensor range
+                param.s_b = param.s_bf * param.s_r;
+            }
+
+            void update_octree(
+                pcl::PointCloud<pcl::PointXYZ>::Ptr obs_pcl, 
+                Eigen::Vector3d p, Eigen::Vector3d q)
+            {
+                std::lock_guard<std::mutex> octree_lock(octree_mutex);
+
+                // Get boundary defined by p and q that is including buffer
+                double max_x_arg = p.x() + param.s_b;
+                double min_x_arg = p.x() - param.s_b;
+                
+                double max_y_arg = p.y() + param.s_b;
+                double min_y_arg = p.y() - param.s_b;
+
+                double max_z_arg = param.h_c.second;
+                double min_z_arg = param.h_c.first;
+
+                /** @brief Debug message **/
+                // std::cout << "Boundaries = " << max_x_arg << " " << min_x_arg << " " << 
+                //     max_y_arg << " " << min_y_arg << " " << 
+                //     max_z_arg << " " << min_z_arg << std::endl;
+
+                _octree.deleteTree();
+                _octree.defineBoundingBox(min_x_arg, min_y_arg, min_z_arg,
+                    max_x_arg, max_y_arg, max_z_arg);
+                _octree.setInputCloud(obs_pcl);
+                _octree.addPointsFromInputCloud();
+                /** @brief Debug message **/
+                std::cout << "Pointcloud size = " << KBLU << 
+                    obs_pcl->points.size() << KNRM << std::endl;
+                
+                _store_cloud = obs_pcl;
+                _occupied_points = _octree.getOccupiedVoxelCenters(_occupied_voxels);
+                
+                _octree.getBoundingBox(min_bnd.x(), min_bnd.y(), min_bnd.z(),
+                    max_bnd.x(), max_bnd.y(), max_bnd.z());
+                /** @brief Debug message **/
+                std::cout << "Minimum Boundary = " << KBLU << min_bnd.transpose() << KNRM << " " << 
+                    "Maximum Boundary = " << KBLU << max_bnd.transpose() << KNRM << std::endl;
+            }
+
         private:
 
             std::mutex octree_mutex, search_mutex; 
@@ -75,6 +172,8 @@ namespace tbborrt_server
                 Eigen::Vector3d position;
             };
 
+            tbborrt_server::tbborrt_server_node::parameters param;
+
             Node start_node;
             Node end_node;
 
@@ -83,17 +182,8 @@ namespace tbborrt_server
             int iteration;
             std::random_device dev;
             
-            /** 
-            * @brief Parameters for the RRT module performance
-            * @param _height_constrain = The minimum and maximum height of the search
-            * @param _protected_zone = Any protected zone to avoid considering waypoints inside
-            * @param _runtime_error,first() = _sub_runtime_error = The timeout for each search in the module
-            * @param _runtime_error,second() = _runtime_error = The overall timeout before we close the program 
-            * @param _octree = pcl converted octree class
-            **/
+            /** @param _octree = pcl converted octree class **/
             double _protected_zone, _resolution, _buffer_factor;
-            std::pair<double,double> _runtime_error; // Consist of _sub_runtime_error and _runtime_error
-            std::pair<double,double> _height_constrain; // Consist of _min_height and _max_height
             pcl::octree::OctreePointCloudSearch<pcl::PointXYZ> _octree  = decltype(_octree)(0.1);
             pcl::PointCloud<pcl::PointXYZ>::VectorType _occupied_voxels;
             int _occupied_points;
@@ -101,11 +191,7 @@ namespace tbborrt_server
             Eigen::Vector3d min_bnd, max_bnd;
 
             
-            /** 
-            * @brief Parameters for the local map expansion size in the RRT module
-            * @param _sensor_range = Sensor range that will affect the _buffer value 
-            **/
-            double _sensor_range, _sensor_buffer;
+            /** @brief Parameters for the local map expansion size in the RRT module **/
             bool _goal_within_sensory_bounds;
             vector<Eigen::Vector4d> _no_fly_zone;
 
@@ -116,6 +202,8 @@ namespace tbborrt_server
             inline double separation(Eigen::Vector3d p, Eigen::Vector3d q) {return (p - q).norm();}
 
             void search_single_node();
+
+            bool check_valid_hfov(double current_bearing, double transformed_bearing, double fov);
 
             inline Eigen::Quaterniond quaternion_from_pitch_yaw(
                 Eigen::Vector3d v1, Eigen::Vector3d v2)
@@ -218,7 +306,6 @@ namespace tbborrt_server
                     std::cout << KCYN << reordered_path[i].transpose() << KNRM << std::endl;
 
                 return shortened_path;
-                // return path;
             }
 
             inline std::vector<Eigen::Vector3d> get_reorder_path(
@@ -254,111 +341,16 @@ namespace tbborrt_server
             inline bool point_within_octree(Eigen::Vector3d point)
             {
                 // Check octree boundary
-                if (point.x() < max_bnd.x() - _resolution/2 && 
-                    point.x() > min_bnd.x() + _resolution/2 &&
-                    point.y() < max_bnd.y() - _resolution/2 && 
-                    point.y() > min_bnd.y() + _resolution/2 &&
-                    point.z() < max_bnd.z() - _resolution/2 && 
-                    point.z() > min_bnd.z() + _resolution/2)
+                if (point.x() < max_bnd.x() - param.r/2 && 
+                    point.x() > min_bnd.x() + param.r/2 &&
+                    point.y() < max_bnd.y() - param.r/2 && 
+                    point.y() > min_bnd.y() + param.r/2 &&
+                    point.z() < max_bnd.z() - param.r/2 && 
+                    point.z() > min_bnd.z() + param.r/2)
                     return true;
                 else
                     return false;
             } 
-
-        public:
-
-            /** @brief Constructor of the rrt_server node**/ 
-            tbborrt_server_node(){}
-
-            /** @brief Destructor of the rrt_server node**/ 
-            ~tbborrt_server_node()
-            {
-                _octree.deleteTree();
-            }
-
-            bool check_line_validity(Eigen::Vector3d p, Eigen::Vector3d q);
-
-            /** @brief Main run module for the rrt_server node
-            * @param previous_input = The previous input found that is reusable in the search
-            * @param start_end = Original frame start and end position in the search
-            **/ 
-            vector<Eigen::Vector3d> find_path(
-                vector<Eigen::Vector3d> previous_input, 
-                std::pair<Eigen::Vector3d, Eigen::Vector3d> start_end);
-
-            /** @brief set the parameters for the search **/ 
-            void set_parameters(double protected_zone, 
-                vector<Eigen::Vector4d> no_fly_zone,
-                std::pair<double,double> runtime_error, 
-                std::pair<double,double> height_constrain,
-                double sensor_range,
-                double resolution)
-            {
-                _no_fly_zone.clear();
-                _no_fly_zone = no_fly_zone;
-                _protected_zone = protected_zone;
-                _height_constrain = height_constrain;
-                _runtime_error = runtime_error;
-                _sensor_range = sensor_range;
-
-                _octree.setResolution(resolution);
-                _resolution = resolution;
-
-                _buffer_factor = 1.5;
-                // The buffer for the xyz search area determined by _sensor_range
-                _sensor_buffer = _buffer_factor * _sensor_range;
-            }
-
-            void update_octree(
-                pcl::PointCloud<pcl::PointXYZ>::Ptr obs_pcl,
-                Eigen::Vector3d p,
-                Eigen::Vector3d q)
-            {
-                std::lock_guard<std::mutex> octree_lock(octree_mutex);
-
-                double boundary_buffer = 1.0 * _sensor_buffer;
-                // Get boundary defined by p and q that is including buffer
-                // double max_x_arg = max(p.x()+boundary_buffer, q.x()+boundary_buffer);
-                // double min_x_arg = min(p.x()-boundary_buffer, q.x()-boundary_buffer);
-                
-                // double max_y_arg = max(p.y()+boundary_buffer, q.y()+boundary_buffer);
-                // double min_y_arg = min(p.y()-boundary_buffer, q.y()-boundary_buffer);
-                
-                // double max_z_arg = max(p.z()+boundary_buffer, q.z()+boundary_buffer);
-                // double min_z_arg = min(p.z()-boundary_buffer, q.z()-boundary_buffer);
-
-                 double max_x_arg = p.x() + boundary_buffer;
-                double min_x_arg = p.x() - boundary_buffer;
-                
-                double max_y_arg = p.y() + boundary_buffer;
-                double min_y_arg = p.y() - boundary_buffer;
-
-                double max_z_arg = _height_constrain.second + _sensor_buffer;
-                double min_z_arg = _height_constrain.first - _sensor_buffer;
-
-                /** @brief Debug message **/
-                // std::cout << "Boundaries = " << max_x_arg << " " << min_x_arg << " " << 
-                //     max_y_arg << " " << min_y_arg << " " << 
-                //     max_z_arg << " " << min_z_arg << std::endl;
-
-                _octree.deleteTree();
-                _octree.defineBoundingBox(min_x_arg, min_y_arg, min_z_arg,
-                    max_x_arg, max_y_arg, max_z_arg);
-                _octree.setInputCloud(obs_pcl);
-                _octree.addPointsFromInputCloud();
-                /** @brief Debug message **/
-                std::cout << "Pointcloud size = " << KBLU << 
-                    obs_pcl->points.size() << KNRM << std::endl;
-                
-                _store_cloud = obs_pcl;
-                _occupied_points = _octree.getOccupiedVoxelCenters(_occupied_voxels);
-                
-                _octree.getBoundingBox(min_bnd.x(), min_bnd.y(), min_bnd.z(),
-                    max_bnd.x(), max_bnd.y(), max_bnd.z());
-                /** @brief Debug message **/
-                std::cout << "Minimum Boundary = " << KBLU << min_bnd.transpose() << KNRM << " " << 
-                    "Maximum Boundary = " << KBLU << max_bnd.transpose() << KNRM << std::endl;
-            }
 
     };
 }

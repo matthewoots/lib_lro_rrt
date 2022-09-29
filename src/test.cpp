@@ -45,27 +45,28 @@ int main()
 {
     std::random_device dev;
     std::mt19937 generator(dev());
+    tbborrt_server::tbborrt_server_node rrt;
+    tbborrt_server::tbborrt_server_node::parameters rrt_param;
     
-    double map_size = 20.0;
+    rrt_param.m_s = 20.0; // map_size
     std::pair<double,double> height_constrain{0.0, 5.0};
+    rrt_param.h_c = height_constrain;
     std::pair<double,double> runtime_error{0.020, 0.10};
-    double sensor_range = 4.0;
-    double protected_zone = 0.3;
-    double pointcloud_resolution = 0.2;
+    rrt_param.r_e = runtime_error;
+    rrt_param.s_r = 4.0; // sensor_range
+    rrt_param.p_z = 0.3; // protected_zone
+    rrt_param.r = 0.2; // pointcloud_resolution
     vector<Eigen::Vector4d> no_fly_zone;
     vector<Eigen::Vector3d> previous_input;
     pcl::PointCloud<pcl::PointXYZ>::Ptr obs_pcl (new pcl::PointCloud<pcl::PointXYZ>());
 
-    std::uniform_real_distribution<double> dis_middle(-map_size, map_size);
-    std::uniform_real_distribution<double> dis_height(height_constrain.first, height_constrain.second);
-
-    double resolution = protected_zone;
-    tbborrt_server::tbborrt_server_node rrt;
+    std::uniform_real_distribution<double> dis_middle(-rrt_param.m_s, rrt_param.m_s);
+    std::uniform_real_distribution<double> dis_height(rrt_param.h_c.first, rrt_param.h_c.second);
 
     // Generate pointcloud data and produce AA cubes as obstacles
     int obstacle_count = 10;
     double cube_size = 5.0;
-    int divisions = (int)(cube_size / pointcloud_resolution);
+    int divisions = (int)(cube_size / rrt_param.r);
     int point_counts = pow(divisions, 3);
     double divisions_interval = cube_size / (double)divisions;
     std::cout << "divisions = " << divisions << " " << 
@@ -113,9 +114,6 @@ int main()
     {
         std::cout << "Iteration " << KBLU << iteration << KNRM << std::endl;
 
-        rrt.set_parameters(protected_zone, no_fly_zone, 
-            runtime_error, height_constrain, sensor_range, resolution);
-
         bool start_end_not_valid = true;
         Eigen::Vector3d start, end;
 
@@ -139,13 +137,17 @@ int main()
                     obs_pcl->points[(int)i].x - end.x(), 
                     obs_pcl->points[(int)i].y - end.y(), 
                     obs_pcl->points[(int)i].z - end.z());
-                if (start_diff.norm() < protected_zone * 1.5 || end_diff.norm() < protected_zone * 1.5 )
+                if (start_diff.norm() < rrt_param.p_z * 1.5 || end_diff.norm() < rrt_param.p_z * 1.5 )
                     break;
             }
 
             if (count == (int)obs_pcl->points.size() - 1)
                 break;
         }
+
+        rrt_param.s_e.first = start;
+        rrt_param.s_e.first = end;
+        rrt.set_parameters(rrt_param, no_fly_zone);
         
         std::cout << "start_position = " << KBLU << start.transpose() << KNRM << " " <<
                     "end_position = " << KBLU << end.transpose() << KNRM << " " <<
@@ -155,7 +157,8 @@ int main()
         pcl::PointCloud<pcl::PointXYZ>::Ptr output(
             new pcl::PointCloud<pcl::PointXYZ>);
         
-        Eigen::Vector3d dimension = Eigen::Vector3d(sensor_range, sensor_range, sensor_range);
+        Eigen::Vector3d dimension = Eigen::Vector3d(
+            rrt_param.s_r, rrt_param.s_r, rrt_param.s_r);
 
         Eigen::Vector3d min = start - dimension;
         Eigen::Vector3d max = start + dimension;
@@ -175,10 +178,8 @@ int main()
 
 
         time_point<std::chrono::system_clock> time = system_clock::now();
-        std::pair<Eigen::Vector3d, Eigen::Vector3d> start_end;
-        start_end.first = start;
-        start_end.second = end;
-        vector<Eigen::Vector3d> search = rrt.find_path(previous_input, start_end);
+
+        vector<Eigen::Vector3d> search = rrt.find_path(previous_input);
         if ((int)search.size() > 0)
         {
             fail = false;
