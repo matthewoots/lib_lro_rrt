@@ -110,22 +110,29 @@ namespace tbborrt_server
             void set_parameters(
                 parameters parameter, vector<Eigen::Vector4d> no_fly_zone)
             {
+                param = parameters();
                 // Write over the previous data
                 param = parameter;
 
                 _no_fly_zone.clear();
                 _no_fly_zone = no_fly_zone;
-                _octree.setResolution(param.r);
+                if (!set_resolution)
+                {
+                    set_resolution = true;
+                    _octree.setResolution(param.r);
+                }
 
                 // The buffer for the xyz search area determined by the sensor range
                 param.s_b = param.s_bf * param.s_r;
             }
 
-            void update_octree(
+            void update_pose_and_octree(
                 pcl::PointCloud<pcl::PointXYZ>::Ptr obs_pcl, 
                 Eigen::Vector3d p, Eigen::Vector3d q)
             {
                 std::lock_guard<std::mutex> octree_lock(octree_mutex);
+
+                param.s_e.first = p;
 
                 // Get boundary defined by p and q that is including buffer
                 double max_x_arg = p.x() + param.s_b;
@@ -137,28 +144,26 @@ namespace tbborrt_server
                 double max_z_arg = param.h_c.second;
                 double min_z_arg = param.h_c.first;
 
-                /** @brief Debug message **/
-                // std::cout << "Boundaries = " << max_x_arg << " " << min_x_arg << " " << 
-                //     max_y_arg << " " << min_y_arg << " " << 
-                //     max_z_arg << " " << min_z_arg << std::endl;
-
                 _octree.deleteTree();
-                _octree.defineBoundingBox(min_x_arg, min_y_arg, min_z_arg,
+                _octree.defineBoundingBox(
+                    min_x_arg, min_y_arg, min_z_arg,
                     max_x_arg, max_y_arg, max_z_arg);
                 _octree.setInputCloud(obs_pcl);
                 _octree.addPointsFromInputCloud();
                 /** @brief Debug message **/
-                std::cout << "Pointcloud size = " << KBLU << 
-                    obs_pcl->points.size() << KNRM << std::endl;
+                // std::cout << "Pointcloud size = " << KBLU << 
+                //     obs_pcl->points.size() << KNRM << std::endl;
                 
                 _store_cloud = obs_pcl;
+                pcl::PointCloud<pcl::PointXYZ>::VectorType _occupied_voxels;
                 _occupied_points = _octree.getOccupiedVoxelCenters(_occupied_voxels);
                 
-                _octree.getBoundingBox(min_bnd.x(), min_bnd.y(), min_bnd.z(),
+                _octree.getBoundingBox(
+                    min_bnd.x(), min_bnd.y(), min_bnd.z(),
                     max_bnd.x(), max_bnd.y(), max_bnd.z());
                 /** @brief Debug message **/
-                std::cout << "Minimum Boundary = " << KBLU << min_bnd.transpose() << KNRM << " " << 
-                    "Maximum Boundary = " << KBLU << max_bnd.transpose() << KNRM << std::endl;
+                // std::cout << "Minimum Boundary = " << KBLU << min_bnd.transpose() << KNRM << " " << 
+                //     "Maximum Boundary = " << KBLU << max_bnd.transpose() << KNRM << std::endl;
             }
 
         private:
@@ -181,11 +186,10 @@ namespace tbborrt_server
             bool reached = false;
             int iteration;
             std::random_device dev;
+            bool set_resolution = false;
             
             /** @param _octree = pcl converted octree class **/
-            double _protected_zone, _resolution, _buffer_factor;
             pcl::octree::OctreePointCloudSearch<pcl::PointXYZ> _octree  = decltype(_octree)(0.1);
-            pcl::PointCloud<pcl::PointXYZ>::VectorType _occupied_voxels;
             int _occupied_points;
             pcl::PointCloud<pcl::PointXYZ>::Ptr _store_cloud;
             Eigen::Vector3d min_bnd, max_bnd;
@@ -195,7 +199,7 @@ namespace tbborrt_server
             bool _goal_within_sensory_bounds;
             vector<Eigen::Vector4d> _no_fly_zone;
 
-            Eigen::Affine3d global_to_vector_transform;
+            double bearing;
             
             inline int get_nearest_node(Node random, Node base_node);
 

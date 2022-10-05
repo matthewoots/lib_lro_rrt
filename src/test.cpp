@@ -174,7 +174,7 @@ int main()
             output->points.size() << KNRM << " / " << 
             KBLU << obs_pcl->points.size() << KNRM << std::endl;
 
-        rrt.update_octree(output, start, end);
+        rrt.update_pose_and_octree(output, start, end);
 
 
         time_point<std::chrono::system_clock> time = system_clock::now();

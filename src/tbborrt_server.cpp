@@ -49,26 +49,8 @@ namespace tbborrt_server
         Eigen::Vector3d translational_difference = param.s_e.second - param.s_e.first;
         double translational_difference_distance = translational_difference.norm();
         Eigen::Vector3d translational_difference_vec = translational_difference.normalized();
-        Eigen::Quaterniond q = quaternion_from_pitch_yaw(
-            Vector3d(1,0,0), translational_difference_vec);
-
-        // Setup global_to_vector_transform transform
-        global_to_vector_transform = Eigen::Affine3d::Identity(); 
-        // global_to_vector_transform.linear() = q.inverse().toRotationMatrix();
-        global_to_vector_transform.rotate(q.inverse());
-        global_to_vector_transform.translate(-param.s_e.first);
-
-        // Eigen::Affine3d test_transform = Eigen::Affine3d::Identity(); 
-        // test_transform.linear() = q.toRotationMatrix();
-        // test_transform.translate(param.s_e.first);
-        // test_transform.rotate(q);
-
-        // std::cout << "affineMatrixTest1 = " << std::endl << 
-        //     KBLU << global_to_vector_transform.inverse().rotation() << std::endl <<
-        //     KBLU << global_to_vector_transform.inverse().translation() << std::endl <<
-        //     KNRM << "affineMatrixTest2 = "  << std::endl << 
-        //     KBLU << test_transform.rotation() << KNRM << std::endl <<
-        //     KBLU << test_transform.translation() << KNRM << std::endl;
+        
+        double bearing = tan(translational_difference_vec.y() / translational_difference_vec.x());
 
         // Initialize variables for RRT (reset)
         nodes.clear();
@@ -81,24 +63,6 @@ namespace tbborrt_server
         end_node.position = param.s_e.second;
         end_node.parent = NULL;
         end_node.children.clear();
-
-        // Eigen::Vector3d transformed_start = transform_vector_with_affine(
-        //     param.s_e.first, global_to_vector_transform);
-        // Eigen::Vector3d transformed_end = transform_vector_with_affine(
-        //     param.s_e.second, global_to_vector_transform);
-
-        /** @brief Debug message **/
-        // std::cout << "transformed_start = " << KBLU << transformed_start.transpose() << KNRM << 
-        //     " transformed_end = " << KBLU << transformed_end.transpose() << KNRM << std::endl;
-
-        // Eigen::Vector3d original_start = transform_vector_with_affine(
-        //     transformed_start, global_to_vector_transform.inverse());
-        // Eigen::Vector3d original_end = transform_vector_with_affine(
-        //     transformed_end, global_to_vector_transform.inverse());
-
-        /** @brief Debug message **/
-        // std::cout << "original_start = " << KBLU << original_start.transpose() << KNRM << 
-        //     " original_end = " << KBLU << original_end.transpose() << KNRM << std::endl;
 
         _goal_within_sensory_bounds = 
             translational_difference_distance - param.s_b < 0;
@@ -152,7 +116,8 @@ namespace tbborrt_server
         std::mt19937 generator(dev());
         
         // Setup bounds
-        std::uniform_real_distribution<double> dis_middle(-param.s_b, param.s_b);
+        std::uniform_real_distribution<double> dis(-1.0, 1.0);
+        std::uniform_real_distribution<double> dis_off(0.2, 1.0);
         std::uniform_real_distribution<double> dis_height(param.h_c.first, param.h_c.second);
 
         Node* step_node = new Node;
@@ -164,41 +129,52 @@ namespace tbborrt_server
         {
             while (1)
             {
+                // https://mathworld.wolfram.com/SphericalCoordinates.html
+                // https://karthikkaranth.me/blog/generating-random-points-in-a-sphere/
                 pcl::PointXYZ point;
+                double theta = dis(generator) * M_PI;
+                double phi = abs(dis(generator)) * M_PI;
+                double r = dis_off(generator) * param.s_b;
+                double sin_theta = sin(theta); 
+                double cos_theta = cos(theta);
+                double sin_phi = sin(phi); 
+                double cos_phi = cos(phi);
+                // Make sure to clamp the height
+                random_vector = 
+                    Eigen::Vector3d(start_node.position.x() + (r * sin_phi * cos_theta), 
+                    start_node.position.y() + (r * sin_phi * sin_theta), 
+                    min(max(start_node.position.z() + (r * cos_phi), param.h_c.first), param.h_c.second));
 
-                // param.s_b/2 is needed to add an offset so that the random point doesnt lie so far behind the agent
-                transformed_random_vector = Eigen::Vector3d(
-                    min(dis_middle(generator) + param.s_b/2, param.s_b), 
-                    dis_middle(generator), dis_middle(generator));
-                random_vector = transform_vector_with_affine(
-                    transformed_random_vector, global_to_vector_transform.inverse());             
-
-                // Clamp z axis
-                random_vector.z() = dis_height(generator);
-
-                // Check octree boundary
+                // Check octree boundary, if it is exit from this loop
                 if (!point_within_octree(random_vector))
                     break;
                 
                 point.x = random_vector.x();
                 point.y = random_vector.y();
                 point.z = random_vector.z();
-                    
+
+                // Check whether voxel is occupied
                 if (!_octree.isVoxelOccupiedAtPoint(point))
                     break;
             }
         }
         else // When there is no points in the cloud
         {
-            transformed_random_vector = 
-                Eigen::Vector3d(dis_middle(generator) + param.s_b/2, dis_middle(generator), dis_middle(generator));
-            random_vector = transform_vector_with_affine(
-                transformed_random_vector, global_to_vector_transform.inverse());
-            // Clamp z axis
-            random_vector.z() = dis_height(generator);
+            // https://mathworld.wolfram.com/SphericalCoordinates.html
+            // https://karthikkaranth.me/blog/generating-random-points-in-a-sphere/
+            double theta = dis(generator) * M_PI;
+            double phi = abs(dis(generator)) * M_PI;
+            double r = dis_off(generator) * param.s_b;
+            double sin_theta = sin(theta); 
+            double cos_theta = cos(theta);
+            double sin_phi = sin(phi); 
+            double cos_phi = cos(phi);
+            // Make sure to clamp the height
+            random_vector = 
+                Eigen::Vector3d(start_node.position.x() + (r * sin_phi * cos_theta), 
+                start_node.position.y() + (r * sin_phi * sin_theta), 
+                min(max(start_node.position.z() + (r * cos_phi), param.h_c.first), param.h_c.second));
         }
-
-        double transformed_random_vector_distance = transformed_random_vector.norm();
 
         step_node->position = random_vector;
 
@@ -218,7 +194,7 @@ namespace tbborrt_server
         }
 
         /** @brief Debug message **/
-        std::cout << "Random_node = " << random_vector.transpose() << std::endl;
+        // std::cout << "Random_node = " << random_vector.transpose() << std::endl;
 
         bool flag = check_line_validity(
             nodes[index]->position, step_node->position);
@@ -231,8 +207,7 @@ namespace tbborrt_server
         nodes.push_back(step_node);
         nodes[index]->children.push_back(step_node);
 
-        if ((transformed_random_vector_distance > param.s_b && transformed_random_vector.x() > 0) ||
-            check_line_validity(step_node->position, end_node.position))
+        if (check_line_validity(step_node->position, end_node.position))
         {
             reached = true;
             end_node.parent = step_node;
@@ -248,189 +223,60 @@ namespace tbborrt_server
 
     bool tbborrt_server_node::check_line_validity(
         Eigen::Vector3d p, Eigen::Vector3d q)
-    {
-        if (_occupied_points == 0)
-            return true;
-
-        /** @brief Debug message **/
-        // std::cout << "p = " << KGRN << p.transpose() << KNRM << 
-        //     " q = " << KGRN << q.transpose() << KNRM << std::endl;
-            
+    {            
         /** @brief Method 1 **/
-        Eigen::Vector3d translational_difference = q - p;
+        // Get the translational difference p to q
+        Eigen::Vector3d t_d = q - p;
+        // Get the translational vector p to q
+        Eigen::Vector3d t_d_pq = t_d.normalized();
+        // Get the translational vector q to p
+        Eigen::Vector3d t_d_qp = -t_d_pq;
+        // Get the translational norm
+        double t_n = t_d.norm();
 
-        Eigen::Vector3d translational_difference_vec = 
-            translational_difference / translational_difference.norm();
-        Eigen::Quaterniond quat = quaternion_from_pitch_yaw(
-            Vector3d(1,0,0), translational_difference_vec);
-
-        // Setup vector transform
-        Eigen::Affine3d vector_transform = Eigen::Affine3d::Identity(); 
-        vector_transform.rotate(quat.inverse());
-        vector_transform.translate(-p);
-        
-        Eigen::Vector3d t_p = transform_vector_with_affine(p, vector_transform);        
-        Eigen::Vector3d t_q = transform_vector_with_affine(q, vector_transform);
-
-        /** @brief Debug message **/
-        // std::cout << "t_p = " << KGRN << t_p.transpose() << KNRM << 
-        //     " t_q = " << KGRN << t_q.transpose() << KNRM << std::endl;
-
-        vector<std::pair<Eigen::Vector3d,Eigen::Vector3d>> query_pairs;
-
-        int expansion = 0;
-
-        // Create a transformed discretized plane
-        for (int i = 0; i < 1 + expansion * 2; i++)
+        pcl::PointCloud<pcl::PointXYZ>::VectorType voxels_in_line_search;
+        Eigen::Vector3d p_fd = p;
+        Eigen::Vector3d q_fd = q;
+        double dist_counter = 0.0;
+        double step = param.r * 2;
+        while (!point_within_octree(p_fd))
         {
-            for (int j = 0; j < 1 + expansion * 2; j++)
-            {
-                for (int k = 0; k < 1 + expansion * 2; k++)
-                {
-                    std::pair<Eigen::Vector3d,Eigen::Vector3d> point_pair;
-                    point_pair.first = Eigen::Vector3d(
-                        t_p.x() - param.r * expansion + i*param.r,
-                        t_p.y() - param.r * expansion + j*param.r,
-                        t_p.z() - param.r * expansion + k*param.r
-                    );
-                    point_pair.second = Eigen::Vector3d(
-                        t_q.x() - param.r * expansion + i*param.r,
-                        t_q.y() - param.r * expansion + j*param.r,
-                        t_q.z() - param.r * expansion + k*param.r
-                    );
-
-                    /** @brief Debug message **/
-                    // std::cout << "param.r = " << param.r <<
-                    //     " point_pair.first = " << KBLU << point_pair.first.transpose() << KNRM << 
-                    //     " point_pair.second = " << KBLU << point_pair.second.transpose() << KNRM << std::endl;
-
-                    query_pairs.push_back(point_pair);
-                }
-            }
+            if (dist_counter > t_n)
+                return true;
+            Eigen::Vector3d vector_step = t_d_pq * step;
+            // Find new q_f
+            p_fd += vector_step;
+            dist_counter += step;
         }
 
-
-        // Expand the voxel search to encompass a larger box-like area
-        for (int i = 0; i < (int)query_pairs.size(); i++)
+        while (!point_within_octree(q_fd))
         {
-            float precision = (float)param.r;
-            
-            /** @brief Debug message **/
-            // std::cout << "t_p1 = " << KCYN << query_pairs[i].first.transpose() << KNRM << 
-            //     " t_q1 = " << KCYN << query_pairs[i].second.transpose() << KNRM << std::endl;
+            if (dist_counter > t_n)
+                return true;
+            Eigen::Vector3d vector_step = t_d_qp * step;
+            // Find new q_f
+            q_fd += vector_step;
+            dist_counter += step;
+        }
 
-            Eigen::Vector3d o_p = transform_vector_with_affine(
-                query_pairs[i].first, vector_transform.inverse());
-            Eigen::Vector3d o_q = transform_vector_with_affine(
-                query_pairs[i].second, vector_transform.inverse());
-            if (!point_within_octree(o_p) && !point_within_octree(o_q))
-                continue;
+        if ((q_fd - p_fd).norm() < step)
+            return true;
 
-            /** @brief Debug message **/
-            // std::cout << "o_p = " << KRED << o_p.transpose() << KNRM << 
-            //     " o_q = " << KRED << o_q.transpose() << KNRM << std::endl;
+        Eigen::Vector3f p_f = Eigen::Vector3f(
+            (float)p_fd.x(), (float)p_fd.y(), (float)p_fd.z());
+        Eigen::Vector3f q_f = Eigen::Vector3f(
+            (float)q_fd.x(), (float)q_fd.y(), (float)q_fd.z());
 
-            pcl::PointCloud<pcl::PointXYZ>::VectorType voxels_in_line_search;
-            Eigen::Vector3f p_f = Eigen::Vector3f(
-                (float)o_p.x(), (float)o_p.y(), (float)o_p.z());
-            // Eigen::Vector3f q_f = Eigen::Vector3f(
-            //     (float)o_q.x(), (float)o_q.y(), (float)o_q.z());
+        int voxels = (int)_octree.getApproxIntersectedVoxelCentersBySegment(
+                p_f, q_f, voxels_in_line_search, (float)step);
 
-            double distance_target = (o_q-o_p).norm();
-            Eigen::Vector3d direction = (o_q-o_p).normalized();
-            double distance = precision * 2;
-            Eigen::Vector3d extension = distance * direction;
-            double accumulated_distance = 0;
-
-            Eigen::Vector3f q_f;
-            
-            // if o_p is inside the octree
-            if (point_within_octree(o_p))
-            {
-                std::cout << KGRN << "o_p inside octree" << KNRM << std::endl;
-                Eigen::Vector3d query = o_p;
-                while (accumulated_distance - distance_target < 0)
-                {
-                    query = query + extension;
-                    /** @brief Debug message **/
-                    // std::cout << "query = " << query.transpose() << std::endl;
-
-                    if (!point_within_octree(query))
-                    {
-                        query = query - extension;
-                        q_f = Eigen::Vector3f(
-                            (float)query.x(), (float)query.y(), 
-                            (float)query.z());
-                        break;
-                    }
-
-                    accumulated_distance += distance;
-                }
-
-                if (accumulated_distance > distance_target)
-                    q_f = Eigen::Vector3f(
-                        (float)o_q.x(), (float)o_q.y(), (float)o_q.z());
-            }
-            // else we have to find an suitable o_p inside the octree to use 
-            // octree.getApproxIntersectedVoxelCentersBySegment
-            else
-            {
-                std::cout << KRED << "o_p outside octree" << KNRM << std::endl;
-                Eigen::Vector3d query = o_p;
-                bool p_f_found, q_f_found;
-                // move forward into the octree
-                while (accumulated_distance - distance_target < 0)
-                {
-                    query = query + extension;
-                    if (point_within_octree(query) && !p_f_found)
-                    {
-                        p_f = Eigen::Vector3f(
-                            (float)query.x(), (float)query.y(), 
-                            (float)query.z());
-                        p_f_found = true;
-                    }
-
-                    if (!point_within_octree(query) && p_f_found)
-                    {
-                        query = query - extension;
-                        q_f = Eigen::Vector3f(
-                            (float)query.x(), (float)query.y(), 
-                            (float)query.z());
-                        q_f_found = true;
-                        break;
-                    }
-
-                    accumulated_distance += distance;
-                }
-
-                // means q_f and p_f are both outside of the octree
-                if (!q_f_found)
-                {
-                    std::cout << KGRN << "q_f and p_f are both outside" << KNRM << std::endl;
-                    continue;
-                }
-            }
-            
-            std::cout << "p_f " << p_f.transpose() << " q_f " << q_f.transpose() << std::endl;
-            std::cout << "getApproxIntersectedVoxelCentersBySegment" << std::endl;
-            int voxels = (int)_octree.getApproxIntersectedVoxelCentersBySegment(
-                p_f, q_f, voxels_in_line_search, precision);
-
-            /** @brief Debug message **/
-            std::cout << "    voxel_size = " << voxels_in_line_search.size() << std::endl;
-            
-            for (int j = 0; j < voxels; j++)
-            {
-                // Check octree boundary
-                if (!point_within_octree(Eigen::Vector3d(
-                    voxels_in_line_search[j].x, 
-                    voxels_in_line_search[j].y, 
-                    voxels_in_line_search[j].z)))
-                    continue;
-
-                if (_octree.isVoxelOccupiedAtPoint(voxels_in_line_search[j]))
-                    return false;
-            }
+        /** @brief Debug message **/
+        // std::cout << "voxel_size = " << voxels_in_line_search.size() << std::endl;
+        
+        for (int j = 0; j < voxels; j++)
+        {
+            if (_octree.isVoxelOccupiedAtPoint(voxels_in_line_search[j]))
+                return false;
         }
         /** @brief End of Method 1 **/
         
