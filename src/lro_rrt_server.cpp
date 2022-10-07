@@ -1,5 +1,5 @@
 /*
- * tbborrt_server.cpp
+ * lro_rrt_server.cpp
  *
  * ---------------------------------------------------------------------
  * Copyright (C) 2022 Matthew (matthewoots at gmail.com)
@@ -31,11 +31,11 @@
 #define KCYN  "\033[36m"
 #define KWHT  "\033[37m"
 
-#include <tbborrt_server.h>
+#include <lro_rrt_server.h>
 
-namespace tbborrt_server
+namespace lro_rrt_server
 {
-    vector<Eigen::Vector3d> tbborrt_server_node::find_path(vector<Eigen::Vector3d> previous_input)
+    vector<Eigen::Vector3d> lro_rrt_server_node::find_path(vector<Eigen::Vector3d> previous_input)
     {
         std::lock_guard<std::mutex> octree_lock(octree_mutex);
 
@@ -108,7 +108,7 @@ namespace tbborrt_server
         return path_extraction();
     }
 
-    void tbborrt_server_node::search_single_node()
+    void lro_rrt_server_node::search_single_node()
     {
         std::mt19937 generator(dev());
         
@@ -218,7 +218,7 @@ namespace tbborrt_server
         iteration++;
     }
 
-    bool tbborrt_server_node::check_line_validity(
+    bool lro_rrt_server_node::check_line_validity(
         Eigen::Vector3d p, Eigen::Vector3d q)
     {            
         /** @brief Method 1 **/
@@ -331,7 +331,7 @@ namespace tbborrt_server
 
     // [get_nearest_node] is responsible for finding the nearest node in the tree 
     // for a particular random node. 
-    inline int tbborrt_server_node::get_nearest_node(Node random, Node base_node)
+    inline int lro_rrt_server_node::get_nearest_node(Node random, Node base_node)
     {
         // We give dist a default value if total node is 1 it will fall back on this
         double dist = separation(base_node.position, random.position);
@@ -355,7 +355,7 @@ namespace tbborrt_server
     // Edit function from:
     // https://pointclouds.org/documentation/octree__pointcloud_8hpp_source.html#l00269
     // Definition at line 269 of file octree_pointcloud.hpp
-    bool tbborrt_server_node::check_approx_intersection_by_segment(
+    bool lro_rrt_server_node::check_approx_intersection_by_segment(
         const Eigen::Vector3d origin, const Eigen::Vector3d end, float precision)
     {
         Eigen::Vector3d direction = end - origin;

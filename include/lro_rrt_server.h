@@ -1,5 +1,5 @@
 /*
- * tbborrt_server.h
+ * lro_rrt_server.h
  *
  * ---------------------------------------------------------------------
  * Copyright (C) 2022 Matthew (matthewoots at gmail.com)
@@ -28,8 +28,8 @@
 * https://github.com/otherlab/pcl/blob/master/test/octree/test_octree.cpp 
 */
 
-#ifndef TBBORRT_SERVER_H
-#define TBBORRT_SERVER_H
+#ifndef LRO_RRT_SERVER_H
+#define LRO_RRT_SERVER_H
 
 #include <iostream>
 #include <cmath>
@@ -59,10 +59,10 @@ using namespace std::chrono;
 #define KCYN  "\033[36m"
 #define KWHT  "\033[37m"
 
-namespace tbborrt_server
+namespace lro_rrt_server
 {
 
-    class tbborrt_server_node
+    class lro_rrt_server_node
     {
         public:
 
@@ -91,10 +91,10 @@ namespace tbborrt_server
             };
 
             /** @brief Constructor of the rrt_server node**/ 
-            tbborrt_server_node(){}
+            lro_rrt_server_node(){}
 
             /** @brief Destructor of the rrt_server node**/ 
-            ~tbborrt_server_node()
+            ~lro_rrt_server_node()
             {
                 _octree.deleteTree();
             }
@@ -226,7 +226,7 @@ namespace tbborrt_server
                 Eigen::Vector3d position;
             };
 
-            tbborrt_server::tbborrt_server_node::parameters param;
+            lro_rrt_server::lro_rrt_server_node::parameters param;
 
             Node start_node, end_node;
 

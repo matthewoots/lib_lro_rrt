@@ -22,7 +22,7 @@
  * 
  */
 
-#include "tbborrt_server.h"
+#include "lro_rrt_server.h"
 #include <pcl/filters/crop_box.h>
 #include <cmath>
 #include <random>
@@ -37,7 +37,7 @@
 #define KCYN  "\033[36m"
 #define KWHT  "\033[37m"
 
-using namespace tbborrt_server;
+using namespace lro_rrt_server;
 using namespace std::this_thread; // sleep_for, sleep_until
 using namespace std::chrono; // nanoseconds, system_clock, seconds
 
@@ -45,8 +45,8 @@ int main()
 {
     std::random_device dev;
     std::mt19937 generator(dev());
-    tbborrt_server::tbborrt_server_node rrt;
-    tbborrt_server::tbborrt_server_node::parameters rrt_param;
+    lro_rrt_server::lro_rrt_server_node rrt;
+    lro_rrt_server::lro_rrt_server_node::parameters rrt_param;
     
     rrt_param.m_s = 20.0; // map_size
     std::pair<double,double> height_constrain{0.0, 5.0};
