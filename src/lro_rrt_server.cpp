@@ -161,8 +161,9 @@ namespace lro_rrt_server
         // int voxels = (int)_octree.getApproxIntersectedVoxelCentersBySegment(
         //         p_fd, q_fd, voxels_in_line_search, (float)step);
         
+        Eigen::Vector3d intersect;
         return check_approx_intersection_by_segment(
-            p_fd, q_fd, (float)step);
+            p_fd, q_fd, (float)step, intersect);
         
     }
 
@@ -229,6 +230,76 @@ namespace lro_rrt_server
         /** @brief Debug message **/
         // std::cout << "Minimum Boundary = " << KBLU << search_param.mn_b.transpose() << KNRM << " " << 
         //     "Maximum Boundary = " << KBLU << search_param.mx_b.transpose() << KNRM << std::endl;
+    }
+
+    // Edit function from:
+    // https://pointclouds.org/documentation/octree__pointcloud_8hpp_source.html#l00269
+    // Definition at line 269 of file octree_pointcloud.hpp
+    bool lro_rrt_server_node::check_approx_intersection_by_segment(
+        const Eigen::Vector3d origin, const Eigen::Vector3d end, float precision, Eigen::Vector3d& intersect)
+    {
+        Eigen::Vector3d direction = end - origin;
+        double norm = direction.norm();
+        direction.normalize();
+
+        const double step_size = param.r * precision;
+        // Ensure we get at least one step for the first voxel.
+        const auto nsteps = std::max<std::size_t>(1, norm / step_size);
+        
+        pcl::octree::OctreeKey prev_key;
+        
+        bool bkeyDefined = false;
+        
+        // Walk along the line segment with small steps.
+        for (std::size_t i = 0; i < nsteps; ++i) {
+            Eigen::Vector3d p = origin + (direction * step_size * static_cast<float>(i));
+        
+            pcl::PointXYZ octree_p;
+            octree_p.x = p.x();
+            octree_p.y = p.y();
+            octree_p.z = p.z();
+        
+            pcl::octree::OctreeKey key;
+            gen_octree_key_for_point(octree_p, key);
+        
+            // Not a new key, still the same voxel.
+            if ((key == prev_key) && (bkeyDefined))
+            continue;
+        
+            prev_key = key;
+            bkeyDefined = true;
+
+            pcl::PointXYZ point;
+            gen_leaf_node_center_from_octree_key(key, point);
+            if (_octree.isVoxelOccupiedAtPoint(point))
+            {
+                intersect.x() = point.x;
+                intersect.y() = point.y;
+                intersect.z() = point.z;
+                return false;
+            }
+        }
+        
+        pcl::octree::OctreeKey end_key;
+        pcl::PointXYZ end_p;
+        end_p.x = end.x();
+        end_p.y = end.y();
+        end_p.z = end.z();
+
+        gen_octree_key_for_point(end_p, end_key);
+        if (!(end_key == prev_key)) {
+            pcl::PointXYZ point;
+            gen_leaf_node_center_from_octree_key(end_key, point);
+            if (_octree.isVoxelOccupiedAtPoint(point))
+            {
+                intersect.x() = point.x;
+                intersect.y() = point.y;
+                intersect.z() = point.z;
+                return false;
+            }
+        }
+        
+        return true;
     }
 
     /** *********************************
@@ -448,63 +519,4 @@ namespace lro_rrt_server
             return false;
     }
 
-    // Edit function from:
-    // https://pointclouds.org/documentation/octree__pointcloud_8hpp_source.html#l00269
-    // Definition at line 269 of file octree_pointcloud.hpp
-    bool lro_rrt_server_node::check_approx_intersection_by_segment(
-        const Eigen::Vector3d origin, const Eigen::Vector3d end, float precision)
-    {
-        Eigen::Vector3d direction = end - origin;
-        double norm = direction.norm();
-        direction.normalize();
-
-        const double step_size = param.r * precision;
-        // Ensure we get at least one step for the first voxel.
-        const auto nsteps = std::max<std::size_t>(1, norm / step_size);
-        
-        pcl::octree::OctreeKey prev_key;
-        
-        bool bkeyDefined = false;
-        
-        // Walk along the line segment with small steps.
-        for (std::size_t i = 0; i < nsteps; ++i) {
-            Eigen::Vector3d p = origin + (direction * step_size * static_cast<float>(i));
-        
-            pcl::PointXYZ octree_p;
-            octree_p.x = p.x();
-            octree_p.y = p.y();
-            octree_p.z = p.z();
-        
-            pcl::octree::OctreeKey key;
-            gen_octree_key_for_point(octree_p, key);
-        
-            // Not a new key, still the same voxel.
-            if ((key == prev_key) && (bkeyDefined))
-            continue;
-        
-            prev_key = key;
-            bkeyDefined = true;
-
-            pcl::PointXYZ point;
-            gen_leaf_node_center_from_octree_key(key, point);
-            if (_octree.isVoxelOccupiedAtPoint(point))
-                return false;
-        }
-        
-        pcl::octree::OctreeKey end_key;
-        pcl::PointXYZ end_p;
-        end_p.x = end.x();
-        end_p.y = end.y();
-        end_p.z = end.z();
-
-        gen_octree_key_for_point(end_p, end_key);
-        if (!(end_key == prev_key)) {
-            pcl::PointXYZ point;
-            gen_leaf_node_center_from_octree_key(end_key, point);
-            if (_octree.isVoxelOccupiedAtPoint(point))
-                return false;
-        }
-        
-        return true;
-    }
 }

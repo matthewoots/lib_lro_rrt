@@ -126,6 +126,10 @@ namespace lro_rrt_server
             /** @brief Update the pose and the octree, since the octree is centered around the pose due to perception range **/ 
             void update_pose_and_octree(
                 pcl::PointCloud<pcl::PointXYZ>::Ptr obs_pcl, Eigen::Vector3d p, Eigen::Vector3d q);
+            
+            /** @brief Used inside check_line_validity and it checks for intersected voxels that contain pointclouds **/ 
+            bool check_approx_intersection_by_segment(
+                const Eigen::Vector3d origin, const Eigen::Vector3d end, float precision, Eigen::Vector3d& intersect);
 
             /** @brief Edited from the protected function for octree
              * void pcl::octree::OctreePointCloud<PointT, LeafContainerT, BranchContainerT, OctreeT>::
@@ -215,10 +219,6 @@ namespace lro_rrt_server
 
             /** @brief Check if the point is within the octree **/
             inline bool point_within_octree(Eigen::Vector3d point);
-
-            /** @brief Used inside check_line_validity and it checks for intersected voxels that contain pointclouds **/ 
-            bool check_approx_intersection_by_segment(
-                const Eigen::Vector3d origin, const Eigen::Vector3d end, float precision);
 
             inline Eigen::Quaterniond quaternion_from_pitch_yaw(
                 Eigen::Vector3d v1, Eigen::Vector3d v2)
