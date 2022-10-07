@@ -101,6 +101,9 @@ namespace tbborrt_server
 
             bool check_line_validity(Eigen::Vector3d p, Eigen::Vector3d q);
 
+            bool check_approx_intersection_by_segment(
+                const Eigen::Vector3d origin, const Eigen::Vector3d end, float precision);
+
             /** @brief Main run module for the rrt_server node
             * @param previous_input = The previous input found that is reusable in the search
             **/ 
@@ -135,19 +138,19 @@ namespace tbborrt_server
                 param.s_e.first = p;
 
                 // Get boundary defined by p and q that is including buffer
-                double max_x_arg = p.x() + param.s_b;
-                double min_x_arg = p.x() - param.s_b;
+                // double max_x_arg = p.x() + param.s_b;
+                // double min_x_arg = p.x() - param.s_b;
                 
-                double max_y_arg = p.y() + param.s_b;
-                double min_y_arg = p.y() - param.s_b;
+                // double max_y_arg = p.y() + param.s_b;
+                // double min_y_arg = p.y() - param.s_b;
 
-                double max_z_arg = param.h_c.second;
-                double min_z_arg = param.h_c.first;
+                // double max_z_arg = param.h_c.second;
+                // double min_z_arg = param.h_c.first;
 
                 _octree.deleteTree();
-                _octree.defineBoundingBox(
-                    min_x_arg, min_y_arg, min_z_arg,
-                    max_x_arg, max_y_arg, max_z_arg);
+                // _octree.defineBoundingBox(
+                //     min_x_arg, min_y_arg, min_z_arg,
+                //     max_x_arg, max_y_arg, max_z_arg);
                 _octree.setInputCloud(obs_pcl);
                 _octree.addPointsFromInputCloud();
                 /** @brief Debug message **/
@@ -161,9 +164,55 @@ namespace tbborrt_server
                 _octree.getBoundingBox(
                     min_bnd.x(), min_bnd.y(), min_bnd.z(),
                     max_bnd.x(), max_bnd.y(), max_bnd.z());
+
+                // pcl::octree::OctreePointCloud<PointT, LeafContainerT, BranchContainerT, OctreeT>::getKeyBitSize()
+                const float min_value = std::numeric_limits<float>::epsilon();
+                
+                max_key[0] =
+                    static_cast<uint8_t>(std::ceil(
+                    (max_bnd.x() - min_bnd.x() - min_value) / param.r));
+                max_key[1] =
+                    static_cast<uint8_t>(std::ceil(
+                    (max_bnd.y() - min_bnd.y() - min_value) / param.r));
+                max_key[2] =
+                    static_cast<uint8_t>(std::ceil(
+                    (max_bnd.z() - min_bnd.z() - min_value) / param.r));
+                
                 /** @brief Debug message **/
                 // std::cout << "Minimum Boundary = " << KBLU << min_bnd.transpose() << KNRM << " " << 
                 //     "Maximum Boundary = " << KBLU << max_bnd.transpose() << KNRM << std::endl;
+            }
+
+            // void pcl::octree::OctreePointCloud<PointT, LeafContainerT, BranchContainerT, OctreeT>::
+            //     genOctreeKeyforPoint(const PointT& point_arg, OctreeKey& key_arg) const
+            void gen_octree_key_for_point(
+                const pcl::PointXYZ point_arg, pcl::octree::OctreeKey& key_arg)
+            {
+                // calculate integer key for point coordinates
+                key_arg.x = static_cast<uint8_t>((point_arg.x - min_bnd.x()) / param.r);
+                key_arg.y = static_cast<uint8_t>((point_arg.y - min_bnd.y()) / param.r);
+                key_arg.z = static_cast<uint8_t>((point_arg.z - min_bnd.z()) / param.r);
+                
+                assert(key_arg.x <= max_key[0]);
+                assert(key_arg.y <= max_key[1]);
+                assert(key_arg.z <= max_key[2]);
+            }
+
+            // void pcl::octree::OctreePointCloud<PointT, LeafContainerT, BranchContainerT, OctreeT>::
+            //     genLeafNodeCenterFromOctreeKey(const OctreeKey& key, PointT& point) const
+            void gen_leaf_node_center_from_octree_key(
+                const pcl::octree::OctreeKey key, pcl::PointXYZ& point)
+            {
+                // define point to leaf node voxel center
+                point.x = static_cast<float>(
+                    (static_cast<double>(key.x) + 0.5f) * 
+                    param.r + min_bnd.x());
+                point.y = static_cast<float>(
+                    (static_cast<double>(key.y) + 0.5f) * 
+                    param.r + min_bnd.y());
+                point.z =static_cast<float>(
+                    (static_cast<double>(key.z) + 0.5f) * 
+                    param.r + min_bnd.z());
             }
 
         private:
@@ -179,27 +228,27 @@ namespace tbborrt_server
 
             tbborrt_server::tbborrt_server_node::parameters param;
 
-            Node start_node;
-            Node end_node;
+            Node start_node, end_node;
 
             vector<Node*> nodes;
             bool reached = false;
-            int iteration;
-            std::random_device dev;
             bool set_resolution = false;
-            
-            /** @param _octree = pcl converted octree class **/
-            pcl::octree::OctreePointCloudSearch<pcl::PointXYZ> _octree  = decltype(_octree)(0.1);
-            int _occupied_points;
-            pcl::PointCloud<pcl::PointXYZ>::Ptr _store_cloud;
-            Eigen::Vector3d min_bnd, max_bnd;
 
-            
-            /** @brief Parameters for the local map expansion size in the RRT module **/
-            bool _goal_within_sensory_bounds;
-            vector<Eigen::Vector4d> _no_fly_zone;
+            int iteration;
+            int _occupied_points;
 
             double bearing;
+
+            std::random_device dev;
+            
+            /** @param _octree pcl converted octree class **/
+            pcl::octree::OctreePointCloudSearch<pcl::PointXYZ> _octree  = decltype(_octree)(0.1);
+            pcl::PointCloud<pcl::PointXYZ>::Ptr _store_cloud;
+
+            Eigen::Vector3d min_bnd, max_bnd;
+            std::uint8_t max_key[3];
+            
+            vector<Eigen::Vector4d> _no_fly_zone;
             
             inline int get_nearest_node(Node random, Node base_node);
 
@@ -273,18 +322,6 @@ namespace tbborrt_server
                     Eigen::Quaterniond::FromTwoVectors(v1.normalized(), v2.normalized());
 
                 return q;
-            }
-
-            /** @brief Transform pose according to the translation and q given in affine form*/
-            inline Eigen::Vector3d transform_vector_with_affine(
-                Eigen::Vector3d p, Eigen::Affine3d t)
-            {
-                Eigen::Affine3d pose(Affine3d::Identity());
-                pose.translation() = p;
-
-                Eigen::Affine3d transformed_pose = t * pose;   
-
-                return transformed_pose.translation();
             }
 
             std::vector<Eigen::Vector3d> path_extraction()

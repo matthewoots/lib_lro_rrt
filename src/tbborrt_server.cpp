@@ -63,9 +63,6 @@ namespace tbborrt_server
         end_node.position = param.s_e.second;
         end_node.parent = NULL;
         end_node.children.clear();
-
-        _goal_within_sensory_bounds = 
-            translational_difference_distance - param.s_b < 0;
         
         time_point<std::chrono::system_clock> fail_timer = system_clock::now();
         
@@ -234,7 +231,6 @@ namespace tbborrt_server
         // Get the translational norm
         double t_n = t_d.norm();
 
-        pcl::PointCloud<pcl::PointXYZ>::VectorType voxels_in_line_search;
         Eigen::Vector3d p_fd = p;
         Eigen::Vector3d q_fd = q;
         double dist_counter = 0.0;
@@ -262,22 +258,13 @@ namespace tbborrt_server
         if ((q_fd - p_fd).norm() < step)
             return true;
 
-        Eigen::Vector3f p_f = Eigen::Vector3f(
-            (float)p_fd.x(), (float)p_fd.y(), (float)p_fd.z());
-        Eigen::Vector3f q_f = Eigen::Vector3f(
-            (float)q_fd.x(), (float)q_fd.y(), (float)q_fd.z());
-
-        int voxels = (int)_octree.getApproxIntersectedVoxelCentersBySegment(
-                p_f, q_f, voxels_in_line_search, (float)step);
-
-        /** @brief Debug message **/
-        // std::cout << "voxel_size = " << voxels_in_line_search.size() << std::endl;
+        // pcl::PointCloud<pcl::PointXYZ>::VectorType voxels_in_line_search;
+        // int voxels = (int)_octree.getApproxIntersectedVoxelCentersBySegment(
+        //         p_fd, q_fd, voxels_in_line_search, (float)step);
         
-        for (int j = 0; j < voxels; j++)
-        {
-            if (_octree.isVoxelOccupiedAtPoint(voxels_in_line_search[j]))
-                return false;
-        }
+        return check_approx_intersection_by_segment(
+            p_fd, q_fd, (float)step);
+
         /** @brief End of Method 1 **/
         
 
@@ -334,10 +321,12 @@ namespace tbborrt_server
         //     search_point.y = distance_travelled.y() + search_point.y;
         //     search_point.z = distance_travelled.z() + search_point.z;
         // }
+
+        // return true;
+
         /** @brief End of Method 2 **/
 
-        // std::cout << KGRN << "Out of loop" << KNRM << std::endl;
-        return true;
+        
     }
 
     // [get_nearest_node] is responsible for finding the nearest node in the tree 
@@ -361,5 +350,65 @@ namespace tbborrt_server
             }
         }
         return linking_node;
+    }
+
+    // Edit function from:
+    // https://pointclouds.org/documentation/octree__pointcloud_8hpp_source.html#l00269
+    // Definition at line 269 of file octree_pointcloud.hpp
+    bool tbborrt_server_node::check_approx_intersection_by_segment(
+        const Eigen::Vector3d origin, const Eigen::Vector3d end, float precision)
+    {
+        Eigen::Vector3d direction = end - origin;
+        double norm = direction.norm();
+        direction.normalize();
+
+        const double step_size = param.r * precision;
+        // Ensure we get at least one step for the first voxel.
+        const auto nsteps = std::max<std::size_t>(1, norm / step_size);
+        
+        pcl::octree::OctreeKey prev_key;
+        
+        bool bkeyDefined = false;
+        
+        // Walk along the line segment with small steps.
+        for (std::size_t i = 0; i < nsteps; ++i) {
+            Eigen::Vector3d p = origin + (direction * step_size * static_cast<float>(i));
+        
+            pcl::PointXYZ octree_p;
+            octree_p.x = p.x();
+            octree_p.y = p.y();
+            octree_p.z = p.z();
+        
+            pcl::octree::OctreeKey key;
+            gen_octree_key_for_point(octree_p, key);
+        
+            // Not a new key, still the same voxel.
+            if ((key == prev_key) && (bkeyDefined))
+            continue;
+        
+            prev_key = key;
+            bkeyDefined = true;
+
+            pcl::PointXYZ point;
+            gen_leaf_node_center_from_octree_key(key, point);
+            if (_octree.isVoxelOccupiedAtPoint(point))
+                return false;
+        }
+        
+        pcl::octree::OctreeKey end_key;
+        pcl::PointXYZ end_p;
+        end_p.x = end.x();
+        end_p.y = end.y();
+        end_p.z = end.z();
+
+        gen_octree_key_for_point(end_p, end_key);
+        if (!(end_key == prev_key)) {
+            pcl::PointXYZ point;
+            gen_leaf_node_center_from_octree_key(end_key, point);
+            if (_octree.isVoxelOccupiedAtPoint(point))
+                return false;
+        }
+        
+        return true;
     }
 }
