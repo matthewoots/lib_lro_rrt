@@ -145,9 +145,7 @@ int main()
                 break;
         }
 
-        rrt_param.s_e.first = start;
-        rrt_param.s_e.first = end;
-        rrt.set_parameters(rrt_param, no_fly_zone);
+        rrt.set_parameters(rrt_param);
         
         std::cout << "start_position = " << KBLU << start.transpose() << KNRM << " " <<
                     "end_position = " << KBLU << end.transpose() << KNRM << " " <<

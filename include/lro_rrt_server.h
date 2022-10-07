@@ -76,7 +76,6 @@ namespace lro_rrt_server
             **/
             struct parameters 
             {
-                std::pair<Eigen::Vector3d, Eigen::Vector3d> s_e; // start and end pair
                 // @runtime_error : consist of _sub_runtime_error and _runtime_error
                 std::pair<double,double> r_e; 
                 // @height_constrain : consist of _min_height and _max_height
@@ -90,134 +89,81 @@ namespace lro_rrt_server
                 double s_b; // @sensor_buffer
             };
 
-            /** @brief Constructor of the rrt_server node**/ 
+            struct search_parameters 
+            {
+                std::pair<Eigen::Vector3d, Eigen::Vector3d> s_e; // start and end pair
+                vector<Eigen::Vector4d> n_f_z; // no fly zones (minx maxx miny maxy)
+                int o_p; // occupied points in the octree
+                Eigen::Vector3d mn_b; // minimum boundary for the octree
+                Eigen::Vector3d mx_b; // maximum boundary for the octree
+                std::uint8_t m_k[3]; // max key for the octree
+            };
+
+            /** @brief Constructor of the RRT node**/ 
             lro_rrt_server_node(){}
 
-            /** @brief Destructor of the rrt_server node**/ 
-            ~lro_rrt_server_node()
-            {
-                _octree.deleteTree();
-            }
+            /** @brief Destructor of the RRT node**/ 
+            ~lro_rrt_server_node(){ _octree.deleteTree();}
 
-            bool check_line_validity(Eigen::Vector3d p, Eigen::Vector3d q);
+            /** @brief Main run module for the RRT server **/ 
+            vector<Eigen::Vector3d> find_path(
+                vector<Eigen::Vector3d> previous_input);
 
-            bool check_approx_intersection_by_segment(
-                const Eigen::Vector3d origin, const Eigen::Vector3d end, float precision);
+            /** @brief Check whether the line between the pair of points is obstacle free **/
+            bool check_line_validity(
+                Eigen::Vector3d p, Eigen::Vector3d q);
 
-            /** @brief Main run module for the rrt_server node
-            * @param previous_input = The previous input found that is reusable in the search
-            **/ 
-            vector<Eigen::Vector3d> find_path(vector<Eigen::Vector3d> previous_input);
+            /** @brief To check the initialization of the RRT parameters **/ 
+            bool initialized() {return init;}
+            void deinitialized() {init = false;}
 
             /** @brief Setup the parameters for the search **/ 
-            void set_parameters(
-                parameters parameter, vector<Eigen::Vector4d> no_fly_zone)
-            {
-                param = parameters();
-                // Write over the previous data
-                param = parameter;
+            void set_parameters(parameters parameter);
 
-                _no_fly_zone.clear();
-                _no_fly_zone = no_fly_zone;
-                if (!set_resolution)
-                {
-                    set_resolution = true;
-                    _octree.setResolution(param.r);
-                }
+            /** @brief Setup no fly zone limits for the search **/ 
+            void set_no_fly_zone(vector<Eigen::Vector4d> no_fly_zone);
 
-                // The buffer for the xyz search area determined by the sensor range
-                param.s_b = param.s_bf * param.s_r;
-            }
-
+            /** @brief Update the pose and the octree, since the octree is centered around the pose due to perception range **/ 
             void update_pose_and_octree(
-                pcl::PointCloud<pcl::PointXYZ>::Ptr obs_pcl, 
-                Eigen::Vector3d p, Eigen::Vector3d q)
-            {
-                std::lock_guard<std::mutex> octree_lock(octree_mutex);
+                pcl::PointCloud<pcl::PointXYZ>::Ptr obs_pcl, Eigen::Vector3d p, Eigen::Vector3d q);
 
-                param.s_e.first = p;
-
-                // Get boundary defined by p and q that is including buffer
-                // double max_x_arg = p.x() + param.s_b;
-                // double min_x_arg = p.x() - param.s_b;
-                
-                // double max_y_arg = p.y() + param.s_b;
-                // double min_y_arg = p.y() - param.s_b;
-
-                // double max_z_arg = param.h_c.second;
-                // double min_z_arg = param.h_c.first;
-
-                _octree.deleteTree();
-                // _octree.defineBoundingBox(
-                //     min_x_arg, min_y_arg, min_z_arg,
-                //     max_x_arg, max_y_arg, max_z_arg);
-                _octree.setInputCloud(obs_pcl);
-                _octree.addPointsFromInputCloud();
-                /** @brief Debug message **/
-                // std::cout << "Pointcloud size = " << KBLU << 
-                //     obs_pcl->points.size() << KNRM << std::endl;
-                
-                _store_cloud = obs_pcl;
-                pcl::PointCloud<pcl::PointXYZ>::VectorType _occupied_voxels;
-                _occupied_points = _octree.getOccupiedVoxelCenters(_occupied_voxels);
-                
-                _octree.getBoundingBox(
-                    min_bnd.x(), min_bnd.y(), min_bnd.z(),
-                    max_bnd.x(), max_bnd.y(), max_bnd.z());
-
-                // pcl::octree::OctreePointCloud<PointT, LeafContainerT, BranchContainerT, OctreeT>::getKeyBitSize()
-                const float min_value = std::numeric_limits<float>::epsilon();
-                
-                max_key[0] =
-                    static_cast<uint8_t>(std::ceil(
-                    (max_bnd.x() - min_bnd.x() - min_value) / param.r));
-                max_key[1] =
-                    static_cast<uint8_t>(std::ceil(
-                    (max_bnd.y() - min_bnd.y() - min_value) / param.r));
-                max_key[2] =
-                    static_cast<uint8_t>(std::ceil(
-                    (max_bnd.z() - min_bnd.z() - min_value) / param.r));
-                
-                /** @brief Debug message **/
-                // std::cout << "Minimum Boundary = " << KBLU << min_bnd.transpose() << KNRM << " " << 
-                //     "Maximum Boundary = " << KBLU << max_bnd.transpose() << KNRM << std::endl;
-            }
-
-            // void pcl::octree::OctreePointCloud<PointT, LeafContainerT, BranchContainerT, OctreeT>::
-            //     genOctreeKeyforPoint(const PointT& point_arg, OctreeKey& key_arg) const
+            /** @brief Edited from the protected function for octree
+             * void pcl::octree::OctreePointCloud<PointT, LeafContainerT, BranchContainerT, OctreeT>::
+             * genOctreeKeyforPoint(const PointT& point_arg, OctreeKey& key_arg) const
+            **/
             void gen_octree_key_for_point(
                 const pcl::PointXYZ point_arg, pcl::octree::OctreeKey& key_arg)
             {
                 // calculate integer key for point coordinates
-                key_arg.x = static_cast<uint8_t>((point_arg.x - min_bnd.x()) / param.r);
-                key_arg.y = static_cast<uint8_t>((point_arg.y - min_bnd.y()) / param.r);
-                key_arg.z = static_cast<uint8_t>((point_arg.z - min_bnd.z()) / param.r);
+                key_arg.x = static_cast<uint8_t>((point_arg.x - search_param.mn_b.x()) / param.r);
+                key_arg.y = static_cast<uint8_t>((point_arg.y - search_param.mn_b.y()) / param.r);
+                key_arg.z = static_cast<uint8_t>((point_arg.z - search_param.mn_b.z()) / param.r);
                 
-                assert(key_arg.x <= max_key[0]);
-                assert(key_arg.y <= max_key[1]);
-                assert(key_arg.z <= max_key[2]);
+                assert(key_arg.x <= search_param.m_k[0]);
+                assert(key_arg.y <= search_param.m_k[1]);
+                assert(key_arg.z <= search_param.m_k[2]);
             }
 
-            // void pcl::octree::OctreePointCloud<PointT, LeafContainerT, BranchContainerT, OctreeT>::
-            //     genLeafNodeCenterFromOctreeKey(const OctreeKey& key, PointT& point) const
+            /** @brief Edited from the protected function for octree
+             * void pcl::octree::OctreePointCloud<PointT, LeafContainerT, BranchContainerT, OctreeT>::
+             * genLeafNodeCenterFromOctreeKey(const OctreeKey& key, PointT& point) const
+            **/
             void gen_leaf_node_center_from_octree_key(
                 const pcl::octree::OctreeKey key, pcl::PointXYZ& point)
             {
                 // define point to leaf node voxel center
                 point.x = static_cast<float>(
                     (static_cast<double>(key.x) + 0.5f) * 
-                    param.r + min_bnd.x());
+                    param.r + search_param.mn_b.x());
                 point.y = static_cast<float>(
                     (static_cast<double>(key.y) + 0.5f) * 
-                    param.r + min_bnd.y());
+                    param.r + search_param.mn_b.y());
                 point.z =static_cast<float>(
                     (static_cast<double>(key.z) + 0.5f) * 
-                    param.r + min_bnd.z());
+                    param.r + search_param.mn_b.z());
             }
 
         private:
-
-            std::mutex octree_mutex, search_mutex; 
 
             struct Node 
             {
@@ -226,16 +172,21 @@ namespace lro_rrt_server
                 Eigen::Vector3d position;
             };
 
+            std::mutex octree_mutex; 
+
             lro_rrt_server::lro_rrt_server_node::parameters param;
+
+            lro_rrt_server::lro_rrt_server_node::search_parameters search_param;
 
             Node start_node, end_node;
 
             vector<Node*> nodes;
+
             bool reached = false;
             bool set_resolution = false;
+            bool init = false;
 
             int iteration;
-            int _occupied_points;
 
             double bearing;
 
@@ -243,24 +194,36 @@ namespace lro_rrt_server
             
             /** @param _octree pcl converted octree class **/
             pcl::octree::OctreePointCloudSearch<pcl::PointXYZ> _octree  = decltype(_octree)(0.1);
-            pcl::PointCloud<pcl::PointXYZ>::Ptr _store_cloud;
-
-            Eigen::Vector3d min_bnd, max_bnd;
-            std::uint8_t max_key[3];
             
-            vector<Eigen::Vector4d> _no_fly_zone;
-            
+            /** @brief get_nearest_node is responsible for finding the nearest node in the tree
+            * for a particular random node **/ 
             inline int get_nearest_node(Node random, Node base_node);
 
-            inline double separation(Eigen::Vector3d p, Eigen::Vector3d q) {return (p - q).norm();}
-
+            /** @brief Adds in a random node and check for the validity **/
             void search_single_node();
 
-            bool check_valid_hfov(double current_bearing, double transformed_bearing, double fov);
+            // bool check_valid_hfov(double current_bearing, double transformed_bearing, double fov);
+
+            /** @brief Reorder then shorten the path by finding shortest obstacle free path through the nodes **/
+            std::vector<Eigen::Vector3d> path_extraction();
+
+            /** @brief Reorder the path since the output of RRT is inverted **/
+            std::vector<Eigen::Vector3d> get_reorder_path(std::vector<Eigen::Vector3d> path);
+
+            /** @brief Shorten the RRT path by trimming the nodes **/
+            std::vector<Eigen::Vector3d> get_shorten_path(std::vector<Eigen::Vector3d> path);
+
+            /** @brief Check if the point is within the octree **/
+            inline bool point_within_octree(Eigen::Vector3d point);
+
+            /** @brief Used inside check_line_validity and it checks for intersected voxels that contain pointclouds **/ 
+            bool check_approx_intersection_by_segment(
+                const Eigen::Vector3d origin, const Eigen::Vector3d end, float precision);
 
             inline Eigen::Quaterniond quaternion_from_pitch_yaw(
                 Eigen::Vector3d v1, Eigen::Vector3d v2)
             {
+                Eigen::Quaterniond q;
 
                 // https://github.com/toji/gl-matrix/blob/f0583ef53e94bc7e78b78c8a24f09ed5e2f7a20c/src/gl-matrix/quat.js#L54
                 // Eigen::Vector3d xUnitVec3 = Eigen::Vector3d(1,0,0);
@@ -318,80 +281,10 @@ namespace lro_rrt_server
                 //     v1.x()*v2.x() + v1.y()*v2.y() + v1.z()*v2.z();
                 // q.normalize();
 
-                Eigen::Quaterniond q = 
-                    Eigen::Quaterniond::FromTwoVectors(v1.normalized(), v2.normalized());
+                // q = Eigen::Quaterniond::FromTwoVectors(v1.normalized(), v2.normalized());
 
                 return q;
             }
-
-            std::vector<Eigen::Vector3d> path_extraction()
-            {
-                Node up, down;
-                down = end_node;
-                up = *(end_node.parent);
-                std::vector<Eigen::Vector3d> path;
-
-                while(1)
-                {
-                    path.push_back(down.position);
-                    if(up.parent == NULL)
-                        break;
-                    up = *(up.parent);
-                    down = *(down.parent);
-                }
-
-                std::vector<Eigen::Vector3d> reordered_path = get_reorder_path(path);
-                std::vector<Eigen::Vector3d> shortened_path = get_shorten_path(reordered_path);
-
-                for (int i = 0; i < (int)reordered_path.size(); i++)
-                    std::cout << KCYN << reordered_path[i].transpose() << KNRM << std::endl;
-
-                return shortened_path;
-            }
-
-            inline std::vector<Eigen::Vector3d> get_reorder_path(
-                std::vector<Eigen::Vector3d> path)
-            {
-                std::vector<Eigen::Vector3d> reordered_path;
-                reordered_path.push_back(start_node.position);
-                for (int i = (int)path.size()-1; i >= 0; i--)
-                    reordered_path.push_back(path[i]);            
-
-                return reordered_path;
-            }
-
-            inline std::vector<Eigen::Vector3d> get_shorten_path(
-                std::vector<Eigen::Vector3d> path)
-            {
-                std::vector<Eigen::Vector3d> shortened_path;
-                shortened_path.push_back(path[0]);
-
-                for (int i = 1; i < (int)path.size(); i++)
-                {
-                    if (!check_line_validity(
-                        shortened_path[(int)shortened_path.size()-1], path[i]))
-                    {        
-                        shortened_path.push_back(path[i-1]);
-                    }
-                }   
-                shortened_path.push_back(path[path.size()-1]);      
-
-                return shortened_path;
-            }
-
-            inline bool point_within_octree(Eigen::Vector3d point)
-            {
-                // Check octree boundary
-                if (point.x() < max_bnd.x() - param.r/2 && 
-                    point.x() > min_bnd.x() + param.r/2 &&
-                    point.y() < max_bnd.y() - param.r/2 && 
-                    point.y() > min_bnd.y() + param.r/2 &&
-                    point.z() < max_bnd.z() - param.r/2 && 
-                    point.z() > min_bnd.z() + param.r/2)
-                    return true;
-                else
-                    return false;
-            } 
 
     };
 }
