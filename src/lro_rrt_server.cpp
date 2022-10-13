@@ -133,7 +133,7 @@ namespace lro_rrt_server
         Eigen::Vector3d p_fd = p;
         Eigen::Vector3d q_fd = q;
         double dist_counter = 0.0;
-        double step = param.r * 2;
+        double step = param.r * 0.9;
         while (!point_within_octree(p_fd))
         {
             if (dist_counter > t_n)
@@ -242,14 +242,13 @@ namespace lro_rrt_server
         double norm = direction.norm();
         direction.normalize();
 
-        const double step_size = param.r * precision;
+        const double step_size = precision;
         // Ensure we get at least one step for the first voxel.
         const auto nsteps = std::max<std::size_t>(1, norm / step_size);
         
         pcl::octree::OctreeKey prev_key;
         
         bool bkeyDefined = false;
-        
         // Walk along the line segment with small steps.
         for (std::size_t i = 0; i < nsteps; ++i) {
             Eigen::Vector3d p = origin + (direction * step_size * static_cast<float>(i));
@@ -259,18 +258,16 @@ namespace lro_rrt_server
             octree_p.y = p.y();
             octree_p.z = p.z();
         
-            pcl::octree::OctreeKey key;
-            gen_octree_key_for_point(octree_p, key);
-        
+            pcl::octree::OctreeKey main_key;
+            gen_octree_key_for_point(octree_p, main_key);
             // Not a new key, still the same voxel.
-            if ((key == prev_key) && (bkeyDefined))
-            continue;
+            if ((main_key == prev_key))
+                continue;
         
-            prev_key = key;
-            bkeyDefined = true;
+            prev_key = main_key;
 
             pcl::PointXYZ point;
-            gen_leaf_node_center_from_octree_key(key, point);
+            gen_leaf_node_center_from_octree_key(main_key, point);
             if (_octree.isVoxelOccupiedAtPoint(point))
             {
                 intersect.x() = point.x;
@@ -341,13 +338,13 @@ namespace lro_rrt_server
         
         // Setup bounds
         std::uniform_real_distribution<double> dis(-1.0, 1.0);
+        std::uniform_real_distribution<double> dis_clamped(-0.75, 0.75);
         std::uniform_real_distribution<double> dis_off(0.2, 1.0);
         std::uniform_real_distribution<double> dis_height(param.h_c.first, param.h_c.second);
 
         Node* step_node = new Node;
-
         
-        Eigen::Vector3d transformed_random_vector, random_vector;
+        Eigen::Vector3d random_vector;
 
         if (search_param.o_p > 0) // When there are points in the cloud
         {
@@ -357,7 +354,7 @@ namespace lro_rrt_server
                 // https://karthikkaranth.me/blog/generating-random-points-in-a-sphere/
                 pcl::PointXYZ point;
                 double theta = dis(generator) * M_PI;
-                double phi = abs(dis(generator)) * M_PI;
+                double phi = dis_clamped(generator) * M_PI;
                 double r = dis_off(generator) * param.s_b;
                 double sin_theta = sin(theta); 
                 double cos_theta = cos(theta);
