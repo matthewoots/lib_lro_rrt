@@ -83,6 +83,9 @@ namespace lro_rrt_server
                 double s_i; // @search_interval
                 double s_r; // @sensor_range
                 double p_z; // @protected_zone
+                std::pair<double,double> s_l_h; // @search_limit_hfov
+                std::pair<double,double> s_l_v; // @search_limit_vfov
+                double s_d_n; // @scaled_min_dist_from_node
                 double r; // @resolution
                 double m_s; // @map_size
                 double s_bf; // @sensor_buffer_factor
@@ -129,7 +132,8 @@ namespace lro_rrt_server
             
             /** @brief Used inside check_line_validity and it checks for intersected voxels that contain pointclouds **/ 
             bool check_approx_intersection_by_segment(
-                const Eigen::Vector3d origin, const Eigen::Vector3d end, float precision, Eigen::Vector3d& intersect);
+                const Eigen::Vector3d origin, const Eigen::Vector3d end, float precision, 
+                Eigen::Vector3d& intersect, string mode);
 
             /** @brief Edited from the protected function for octree
              * void pcl::octree::OctreePointCloud<PointT, LeafContainerT, BranchContainerT, OctreeT>::
@@ -199,6 +203,8 @@ namespace lro_rrt_server
             /** @param _octree pcl converted octree class **/
             pcl::octree::OctreePointCloudSearch<pcl::PointXYZ> _octree  = decltype(_octree)(0.1);
             
+            pcl::PointCloud<pcl::PointXYZ>::Ptr p_c;
+
             /** @brief get_nearest_node is responsible for finding the nearest node in the tree
             * for a particular random node **/ 
             inline int get_nearest_node(Node random, Node base_node);
@@ -219,6 +225,9 @@ namespace lro_rrt_server
 
             /** @brief Check if the point is within the octree **/
             inline bool point_within_octree(Eigen::Vector3d point);
+
+            /** @brief Constrain angle to between -pi to pi **/
+            double constrain_between_180(double x);
 
             inline Eigen::Quaterniond quaternion_from_pitch_yaw(
                 Eigen::Vector3d v1, Eigen::Vector3d v2)

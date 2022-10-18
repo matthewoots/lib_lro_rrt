@@ -60,7 +60,7 @@ namespace lro_rrt_server
         double translational_difference_distance = translational_difference.norm();
         Eigen::Vector3d translational_difference_vec = translational_difference.normalized();
         
-        double bearing = tan(translational_difference_vec.y() / translational_difference_vec.x());
+        bearing = atan2(translational_difference_vec.y(), translational_difference_vec.x());
 
         // Initialize variables for RRT (reset)
         nodes.clear();
@@ -163,7 +163,7 @@ namespace lro_rrt_server
         
         Eigen::Vector3d intersect;
         return check_approx_intersection_by_segment(
-            p_fd, q_fd, (float)step, intersect);
+            p_fd, q_fd, (float)step, intersect, "rigo");
         
     }
 
@@ -202,6 +202,8 @@ namespace lro_rrt_server
         
         _octree.setInputCloud(obs_pcl);
         _octree.addPointsFromInputCloud();
+
+        p_c = obs_pcl;
         
         /** @brief Debug message **/
         // std::cout << "pointcloud size (" << obs_pcl->points.size() << ")" << std::endl;
@@ -236,7 +238,8 @@ namespace lro_rrt_server
     // https://pointclouds.org/documentation/octree__pointcloud_8hpp_source.html#l00269
     // Definition at line 269 of file octree_pointcloud.hpp
     bool lro_rrt_server_node::check_approx_intersection_by_segment(
-        const Eigen::Vector3d origin, const Eigen::Vector3d end, float precision, Eigen::Vector3d& intersect)
+        const Eigen::Vector3d origin, const Eigen::Vector3d end, 
+        float precision, Eigen::Vector3d& intersect, string mode)
     {
         Eigen::Vector3d direction = end - origin;
         double norm = direction.norm();
@@ -248,9 +251,9 @@ namespace lro_rrt_server
         
         pcl::octree::OctreeKey prev_key;
         
-        bool bkeyDefined = false;
         // Walk along the line segment with small steps.
-        for (std::size_t i = 0; i < nsteps; ++i) {
+        for (std::size_t i = 0; i < nsteps; i++) 
+        {
             Eigen::Vector3d p = origin + (direction * step_size * static_cast<float>(i));
         
             pcl::PointXYZ octree_p;
@@ -268,12 +271,36 @@ namespace lro_rrt_server
 
             pcl::PointXYZ point;
             gen_leaf_node_center_from_octree_key(main_key, point);
-            if (_octree.isVoxelOccupiedAtPoint(point))
+
+            // Check whether the query point is near the center
+            // Or else there is a chance to collide with other voxels
+
+            // double dist = sqrt(pow(octree_p.x - point.x, 2) 
+            //     + pow(octree_p.y - point.y, 2) 
+            //     + pow(octree_p.z - point.z, 2));
+            
+            if (mode.compare("fast") == 0)
             {
-                intersect.x() = point.x;
-                intersect.y() = point.y;
-                intersect.z() = point.z;
-                return false;
+                if (_octree.isVoxelOccupiedAtPoint(point))
+                {
+                    intersect.x() = point.x;
+                    intersect.y() = point.y;
+                    intersect.z() = point.z;
+                    return false;
+                }
+            }
+            else if (mode.compare("rigo") == 0)
+            {
+                vector<int> indices;
+                vector< float > sq_dist;
+                if (_octree.radiusSearch(point, param.r, indices, sq_dist) > 0)
+                {
+                    intersect = Eigen::Vector3d(
+                        (*p_c)[indices[0]].x,
+                        (*p_c)[indices[0]].y,
+                        (*p_c)[indices[0]].z);
+                    return false;
+                }
             }
         }
         
@@ -287,12 +314,28 @@ namespace lro_rrt_server
         if (!(end_key == prev_key)) {
             pcl::PointXYZ point;
             gen_leaf_node_center_from_octree_key(end_key, point);
-            if (_octree.isVoxelOccupiedAtPoint(point))
+            if (mode.compare("fast") == 0)
             {
-                intersect.x() = point.x;
-                intersect.y() = point.y;
-                intersect.z() = point.z;
-                return false;
+                if (_octree.isVoxelOccupiedAtPoint(point))
+                {
+                    intersect.x() = point.x;
+                    intersect.y() = point.y;
+                    intersect.z() = point.z;
+                    return false;
+                }
+            }
+            else if (mode.compare("rigo") == 0)
+            {
+                vector<int> indices;
+                vector< float > sq_dist;
+                if (_octree.radiusSearch(point, param.r, indices, sq_dist) > 0)
+                {
+                    intersect = Eigen::Vector3d(
+                        (*p_c)[indices[0]].x,
+                        (*p_c)[indices[0]].y,
+                        (*p_c)[indices[0]].z);
+                    return false;
+                }
             }
         }
         
@@ -337,9 +380,9 @@ namespace lro_rrt_server
         std::mt19937 generator(dev());
         
         // Setup bounds
-        std::uniform_real_distribution<double> dis(-1.0, 1.0);
-        std::uniform_real_distribution<double> dis_clamped(-0.75, 0.75);
-        std::uniform_real_distribution<double> dis_off(0.2, 1.0);
+        std::uniform_real_distribution<double> dis_hfov(param.s_l_h.first, param.s_l_h.second);
+        std::uniform_real_distribution<double> dis_vfov(param.s_l_v.first, param.s_l_v.second);
+        std::uniform_real_distribution<double> dis_sdn(param.s_d_n, 1.0);
         std::uniform_real_distribution<double> dis_height(param.h_c.first, param.h_c.second);
 
         Node* step_node = new Node;
@@ -352,19 +395,29 @@ namespace lro_rrt_server
             {
                 // https://mathworld.wolfram.com/SphericalCoordinates.html
                 // https://karthikkaranth.me/blog/generating-random-points-in-a-sphere/
+                double a = -M_PI + bearing;
+                Eigen::Matrix3d yaw;
+                yaw << cos(a), -sin(a), 0,
+                    sin(a), cos(a), 0,
+                    0, 0, 1;
                 pcl::PointXYZ point;
-                double theta = dis(generator) * M_PI;
-                double phi = dis_clamped(generator) * M_PI;
-                double r = dis_off(generator) * param.s_b;
+                double theta = dis_hfov(generator) * 2.0*M_PI;
+                double phi = dis_vfov(generator) * M_PI;
+                double r = dis_sdn(generator) * param.s_b;
                 double sin_theta = sin(theta); 
                 double cos_theta = cos(theta);
                 double sin_phi = sin(phi); 
                 double cos_phi = cos(phi);
+                Eigen::Vector3d random_t;
+                random_t << (r * sin_phi * cos_theta),
+                    (r * sin_phi * sin_theta),
+                    (r * cos_phi);
+                random_t = yaw * random_t;
                 // Make sure to clamp the height
                 random_vector = 
-                    Eigen::Vector3d(start_node.position.x() + (r * sin_phi * cos_theta), 
-                    start_node.position.y() + (r * sin_phi * sin_theta), 
-                    min(max(start_node.position.z() + (r * cos_phi), param.h_c.first), param.h_c.second));
+                    Eigen::Vector3d(start_node.position.x() + random_t.x(), 
+                    start_node.position.y() + random_t.y(), 
+                    min(max(start_node.position.z() + random_t.z(), param.h_c.first), param.h_c.second));
 
                 // Check octree boundary, if it is exit from this loop
                 if (!point_within_octree(random_vector))
@@ -379,23 +432,14 @@ namespace lro_rrt_server
                     break;
             }
         }
-        else // When there is no points in the cloud
-        {
-            // https://mathworld.wolfram.com/SphericalCoordinates.html
-            // https://karthikkaranth.me/blog/generating-random-points-in-a-sphere/
-            double theta = dis(generator) * M_PI;
-            double phi = abs(dis(generator)) * M_PI;
-            double r = dis_off(generator) * param.s_b;
-            double sin_theta = sin(theta); 
-            double cos_theta = cos(theta);
-            double sin_phi = sin(phi); 
-            double cos_phi = cos(phi);
-            // Make sure to clamp the height
-            random_vector = 
-                Eigen::Vector3d(start_node.position.x() + (r * sin_phi * cos_theta), 
-                start_node.position.y() + (r * sin_phi * sin_theta), 
-                min(max(start_node.position.z() + (r * cos_phi), param.h_c.first), param.h_c.second));
-        }
+        // else // When there is no points in the cloud
+        // {
+        //     reached = true;
+        //     end_node.parent = step_node;
+        //     nodes.push_back(&end_node);
+        //     (nodes[nodes.size()-1]->children).push_back(&end_node);
+        //     return;
+        // }
 
         step_node->position = random_vector;
 
@@ -514,6 +558,15 @@ namespace lro_rrt_server
             return true;
         else
             return false;
+    }
+
+    /** @brief Constrain angle to between -pi to pi **/
+    double lro_rrt_server_node::constrain_between_180(double x)
+    {
+        x = fmod(x + M_PI,2*M_PI);
+        if (x < 0)
+            x += 2*M_PI;
+        return x - M_PI;
     }
 
 }
