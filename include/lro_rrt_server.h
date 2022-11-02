@@ -171,6 +171,23 @@ namespace lro_rrt_server
                     param.r + search_param.mn_b.z());
             }
 
+            void nearest_distance_to_line(
+                Eigen::Vector3d p, Eigen::Vector3d s, Eigen::Vector3d e, double &d, Eigen::Vector3d &q)
+            {
+                Eigen::Vector3d s_e = e - s;
+                Eigen::Vector3d s_p = p - s;
+                double s_e_d = s_e.norm();
+                double t = (s_e.x() * s_p.x() + s_e.y() * 
+                    s_p.y() + s_e.z() * s_p.z()) / s_e_d;
+                if(t < 0.0)
+                    t = 0;
+                if(t > 1.0)
+                    t = 1;
+
+                d = (t * s_e).norm();
+                q = s + t * s_e;
+            }
+
         private:
 
             struct Node 

@@ -251,36 +251,36 @@ namespace lro_rrt_server
         
         pcl::octree::OctreeKey prev_key;
         
-        // Walk along the line segment with small steps.
-        for (std::size_t i = 0; i < nsteps; i++) 
+        if (mode.compare("fast") == 0)
         {
-            Eigen::Vector3d p = origin + (direction * step_size * static_cast<float>(i));
-        
-            pcl::PointXYZ octree_p;
-            octree_p.x = p.x();
-            octree_p.y = p.y();
-            octree_p.z = p.z();
-        
-            pcl::octree::OctreeKey main_key;
-            gen_octree_key_for_point(octree_p, main_key);
-            // Not a new key, still the same voxel.
-            if ((main_key == prev_key))
-                continue;
-        
-            prev_key = main_key;
-
-            pcl::PointXYZ point;
-            gen_leaf_node_center_from_octree_key(main_key, point);
-
-            // Check whether the query point is near the center
-            // Or else there is a chance to collide with other voxels
-
-            // double dist = sqrt(pow(octree_p.x - point.x, 2) 
-            //     + pow(octree_p.y - point.y, 2) 
-            //     + pow(octree_p.z - point.z, 2));
-            
-            if (mode.compare("fast") == 0)
+            // Walk along the line segment with small steps.
+            for (std::size_t i = 0; i < nsteps; i++) 
             {
+                Eigen::Vector3d p = origin + (direction * step_size * static_cast<float>(i));
+            
+                pcl::PointXYZ octree_p;
+                octree_p.x = p.x();
+                octree_p.y = p.y();
+                octree_p.z = p.z();
+            
+                pcl::octree::OctreeKey main_key;
+                gen_octree_key_for_point(octree_p, main_key);
+                // Not a new key, still the same voxel.
+                if ((main_key == prev_key))
+                    continue;
+            
+                prev_key = main_key;
+
+                pcl::PointXYZ point;
+                gen_leaf_node_center_from_octree_key(main_key, point);
+
+                // Check whether the query point is near the center
+                // Or else there is a chance to collide with other voxels
+
+                // double dist = sqrt(pow(octree_p.x - point.x, 2) 
+                //     + pow(octree_p.y - point.y, 2) 
+                //     + pow(octree_p.z - point.z, 2));
+                
                 if (_octree.isVoxelOccupiedAtPoint(point))
                 {
                     intersect.x() = point.x;
@@ -289,11 +289,34 @@ namespace lro_rrt_server
                     return false;
                 }
             }
-            else if (mode.compare("rigo") == 0)
+            
+        }
+        else if (mode.compare("rigo") == 0)
+        {
+            for (std::size_t i = 0; i < nsteps; i++) 
             {
+                Eigen::Vector3d p = origin + (direction * step_size * static_cast<float>(i));
+            
+                pcl::PointXYZ octree_p;
+                octree_p.x = p.x();
+                octree_p.y = p.y();
+                octree_p.z = p.z();
+            
+                pcl::octree::OctreeKey main_key;
+                gen_octree_key_for_point(octree_p, main_key);
+                // Not a new key, still the same voxel.
+                if ((main_key == prev_key))
+                    continue;
+            
+                prev_key = main_key;
+
+                pcl::PointXYZ point;
+                gen_leaf_node_center_from_octree_key(main_key, point);
+
                 vector<int> indices;
                 vector< float > sq_dist;
-                if (_octree.radiusSearch(point, param.r, indices, sq_dist) > 0)
+                // if (_octree.radiusSearch(point, param.r, indices, sq_dist) > 0)
+                if (_octree.radiusSearch(point, step_size, indices, sq_dist) > 0)
                 {
                     intersect = Eigen::Vector3d(
                         (*p_c)[indices[0]].x,
@@ -328,7 +351,8 @@ namespace lro_rrt_server
             {
                 vector<int> indices;
                 vector< float > sq_dist;
-                if (_octree.radiusSearch(point, param.r, indices, sq_dist) > 0)
+                // if (_octree.radiusSearch(point, param.r, indices, sq_dist) > 0)
+                if (_octree.radiusSearch(point, step_size, indices, sq_dist) > 0)
                 {
                     intersect = Eigen::Vector3d(
                         (*p_c)[indices[0]].x,
