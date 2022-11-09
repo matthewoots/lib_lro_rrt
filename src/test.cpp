@@ -177,8 +177,8 @@ int main()
 
         time_point<std::chrono::system_clock> time = system_clock::now();
 
-        vector<Eigen::Vector3d> search = rrt.find_path(previous_input);
-        if ((int)search.size() > 0)
+        vector<Eigen::Vector3d> search;
+        if (rrt.get_path(previous_input, search))
         {
             fail = false;
             std::cout << KGRN << "Success! Size of " << search.size() << " found" << KNRM << std::endl;
