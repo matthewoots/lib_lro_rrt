@@ -33,6 +33,7 @@ include_directories(
 # add_library(${PROJECT_NAME} STATIC ${SRC_FILES} ${INCLUDE_FILES})
 add_library(${PROJECT_NAME} 
     src/lro_rrt_server.cpp
+    src/lro_rrt_helper.cpp
     kdtree/kdtree.c
     )
 target_include_directories (${PROJECT_NAME} PUBLIC 

@@ -35,19 +35,21 @@
 
 namespace lro_rrt_server
 {
-    /** *********************************
+    /** 
+     * **********************************
      * **********************************
      * **********************************
      * public functions 
      * **********************************
      * **********************************
      * **********************************
-     * **/
+    **/
 
-    /** @brief Main run module for the RRT server **/ 
-    bool lro_rrt_server_node::get_path(
-        vector<Eigen::Vector3d> previous_input,
-        vector<Eigen::Vector3d> &output)
+    /** 
+     * @brief get_path
+     * Main run function of the rrt module 
+    **/ 
+    bool lro_rrt_server_node::get_path(vector<Eigen::Vector3d> &output)
     {
         std::lock_guard<std::mutex> octree_lock(octree_mutex);
 
@@ -56,7 +58,33 @@ namespace lro_rrt_server
         // Check if we have valid start and end positions given
         if (search_param.s_e.first.norm() <= 1E-6 && search_param.s_e.second.norm() <= 1E-6)
         {
-            std::cout << KRED << "fail to find path, return false" << KNRM << std::endl;
+            std::cout << KRED << "[too close] fail to find path, return false" << KNRM << std::endl;
+            return false;
+        }
+
+        bool valid_p1 = true, valid_p2 = true;
+        if (is_point_within_octree(search_param.s_e.first))
+        {
+            pcl::PointXYZ point1(
+                search_param.s_e.first.x(), 
+                search_param.s_e.first.y(), 
+                search_param.s_e.first.z());
+            valid_p1 = !_octree.isVoxelOccupiedAtPoint(point1);
+        }
+        
+        if (is_point_within_octree(search_param.s_e.second))
+        {
+            pcl::PointXYZ point2(
+                search_param.s_e.second.x(), 
+                search_param.s_e.second.y(), 
+                search_param.s_e.second.z());
+            valid_p2 = !_octree.isVoxelOccupiedAtPoint(point2);
+        }
+
+        // Check whether voxel is occupied
+        if (!valid_p1 || !valid_p2)
+        {
+            std::cout << KRED << "[occupied] fail to find path, return false" << KNRM << std::endl;
             return false;
         }
 
@@ -84,6 +112,8 @@ namespace lro_rrt_server
         time_point<std::chrono::system_clock> fail_timer = system_clock::now();
         
         reached = false;
+        kdtree *store_tree;
+        Node *safe_node = new Node;
 
         int iteration = 0;
         // When there are points in the cloud
@@ -101,6 +131,9 @@ namespace lro_rrt_server
                     start_node->position.y(), start_node->position.z(),
                     start_node);
                 
+                double time_offset = 0.0;
+                bool set_offset = false;
+                
                 // while(!reached)
                 while(1)
                 {
@@ -112,8 +145,18 @@ namespace lro_rrt_server
                     //    duration<double>(system_clock::now() - search_timer).count()*1000 << 
                     //    KNRM << "ms" << std::endl;
                     
-                    if (duration<double>(system_clock::now() - fail_sub_timer).count() > param.r_e.first)
+                    if (reached && !set_offset)
+                    {
+                        time_offset = 
+                            param.r_e.first - param.r_t -
+                            duration<double>(system_clock::now() - fail_sub_timer).count();
+                        set_offset = true;
+                    }
+                    
+                    if (duration<double>(system_clock::now() - 
+                        fail_sub_timer).count() + time_offset > param.r_e.first)
                         break;
+                    
                     iteration++;
                 }
 
@@ -121,6 +164,48 @@ namespace lro_rrt_server
                 std::cout << "sub_iterations(" << KBLU <<
                     iteration << KNRM << ")" << std::endl;
                 
+                Eigen::Vector3d r_v = 
+                    (sampler.get_rand_point_in_circle()).normalized() * param.s_r/2.0;
+                double range = param.s_r;
+                struct kdres *neighbours;
+
+                neighbours = kd_nearest_range3(
+                    kd_tree, start_node->position.x() + r_v.x(), 
+                    start_node->position.y() + r_v.y(), 
+                    start_node->position.z() + r_v.z(), range);
+
+                // printf("neighbours %d\n", kd_res_size(neighbours));
+                
+                // Check whether there is no valid nodes at all
+                if (kd_res_size(neighbours) == 1)
+                {
+                    std::cout << KRED << "[no valid] fail to find path, return false" << KNRM << std::endl;
+                    return false;
+                }
+                // double accepted_neighbour_count = 20;
+                // int count = 0;
+                // double best_distance_from_start = -FLT_MAX;
+                
+                // while (!kd_res_end(neighbours) && count < 
+                //     accepted_neighbour_count)
+                // {
+                //     // double pos[3];
+                //     Node *c_n = (Node*)kd_res_item_data(neighbours);
+                //     printf("cost from start %lf count %d\n", 
+                //         c_n->cost_from_start, count);
+                //     if (c_n->cost_from_start > best_distance_from_start && 
+                //         c_n->parent != nullptr)
+                //     {
+                //         safe_node = c_n;
+                //         best_distance_from_start = c_n->cost_from_start;
+                //     }
+                //     // store range query result so that we dont need to query again for rewire;
+                //     kd_res_next(neighbours); // go to next in kd tree range query result
+                //     count++;
+                // }
+                // printf("best neighbour with cost from start %lf count %d\n", 
+                //     best_distance_from_start, count);
+
                 if (reached)
                     break;
             }
@@ -135,16 +220,17 @@ namespace lro_rrt_server
         }
         std::cout << (reached ? "Successful" : "Unsuccessful") << " search complete after " << 
             duration<double>(system_clock::now() - fail_timer).count()*1000 << "ms" << std::endl;
-        
+
         if (!reached)
         {
-            std::cout << KRED << "fail to find path, return false" << KNRM << std::endl;
+            std::cout << KRED << "[use safe path] fail to find path, return false" << KNRM << std::endl;
+            output = extract_final_path(safe_node);
             return false;
         }
         
         nodes.push_back(end_node);
 
-        output = path_extraction();
+        output = extract_final_path(end_node);
 
         std::cout << "intermediate_nodes(" << KBLU << nodes.size() - 2 << KNRM
             ") iterations(" << KBLU << iteration << KNRM << ") path_size(" << 
@@ -153,8 +239,12 @@ namespace lro_rrt_server
         return true;
     }
 
-    /** @brief Check whether the line between the pair of points is obstacle free **/
-    bool lro_rrt_server_node::check_line_validity(Eigen::Vector3d p, Eigen::Vector3d q)
+    /** 
+     * @brief get_line_validity
+     * Check whether the line between the pair of points is 
+     * obstacle free 
+    **/
+    bool lro_rrt_server_node::get_line_validity(Eigen::Vector3d p, Eigen::Vector3d q)
     {
         // Get the translational difference p to q
         Eigen::Vector3d t_d = q - p;
@@ -172,8 +262,7 @@ namespace lro_rrt_server
 
         // time_point<std::chrono::system_clock> t_b_t = system_clock::now();
 
-        while (!point_within_aabb(
-            p_fd, search_param.mn_b, search_param.mx_b))
+        while (!is_point_within_octree(p_fd))
         {
             if (dist_counter > t_n)
                 return true;
@@ -183,8 +272,7 @@ namespace lro_rrt_server
             dist_counter += step;
         }
 
-        while (!point_within_aabb(
-            q_fd, search_param.mn_b, search_param.mx_b))
+        while (!is_point_within_octree(q_fd))
         {
             if (dist_counter > t_n)
                 return true;
@@ -220,11 +308,14 @@ namespace lro_rrt_server
         
         Eigen::Vector3d intersect;
         return check_approx_intersection_by_segment(
-            p_fd, q_fd, (float)step, intersect);
+            p_fd, q_fd, intersect);
         
     }
 
-    /** @brief Setup the parameters for the search **/ 
+    /** 
+     * @brief set_parameters
+     * Setup the parameters for the rrt 
+    **/ 
     void lro_rrt_server_node::set_parameters(parameters parameter)
     {
         // Clean up the previous data
@@ -237,7 +328,10 @@ namespace lro_rrt_server
         param.s_b = param.s_bf * param.s_r;
     }
 
-    /** @brief Setup no fly zone limits for the search **/ 
+    /** 
+     * @brief set_no_fly_zone
+     * Setup no fly zone limits for the search 
+    **/
     void lro_rrt_server_node::set_no_fly_zone(vector<Eigen::Vector4d> no_fly_zone)
     {
         // Clean up the previous data
@@ -246,7 +340,11 @@ namespace lro_rrt_server
         search_param.n_f_z = no_fly_zone;
     }
 
-    /** @brief Update the pose and the octree, since the octree is centered around the pose due to perception range **/ 
+    /** 
+     * @brief update_pose_and_octree
+     * Update the pose and the octree, since the octree is centered 
+     * around the pose due to perception range 
+    **/ 
     void lro_rrt_server_node::update_pose_and_octree(
         pcl::PointCloud<pcl::PointXYZ>::Ptr obs_pcl, Eigen::Vector3d p, Eigen::Vector3d q)
     {
@@ -290,62 +388,76 @@ namespace lro_rrt_server
         //     "Maximum Boundary = " << KBLU << search_param.mx_b.transpose() << KNRM << std::endl;
     }
 
-    // Edit function from:
-    // https://pointclouds.org/documentation/octree__pointcloud_8hpp_source.html#l00269
-    // Definition at line 269 of file octree_pointcloud.hpp
+    /** 
+     * @brief check_approx_intersection_by_segment
+     * Checks for intersected voxels that contain pointclouds 
+     * Edit function from:
+     * https://pointclouds.org/documentation/octree__pointcloud_8hpp_source.html#l00269
+     * Definition at line 269 of file octree_pointcloud.hpp
+    **/ 
     bool lro_rrt_server_node::check_approx_intersection_by_segment(
         const Eigen::Vector3d origin, const Eigen::Vector3d end, 
-        float precision, Eigen::Vector3d& intersect)
+        Eigen::Vector3d& intersect)
     {
-        Eigen::Vector3d direction = end - origin;
-        double norm = direction.norm();
-        direction.normalize();
+        pcl::octree::OctreeKey origin_key, end_key;
+        pcl::PointXYZ octree_origin(
+            origin.x(), origin.y(), origin.z());
+        pcl::PointXYZ octree_end(
+            end.x(), end.y(), end.z());
+        gen_octree_key_for_point(octree_origin, origin_key);
+        gen_octree_key_for_point(octree_end, end_key);
 
-        const double step_size = precision;
-        // Ensure we get at least one step for the first voxel.
-        const auto nsteps = std::max<std::size_t>(1, norm / step_size);
+        vector<Eigen::Vector3i> offset_list;
         
-        pcl::octree::OctreeKey prev_key;
-
-        vector<Eigen::Vector3i> index;
+        int extra_safety_volume = 1;
         // Setup the neighbouring boxes
-        for (int i = -1; i <= 1; i++)
-            for (int j = -1; j <= 1; j++)
-                for (int k = -1; k <= 1; k++)
-                    index.push_back(Eigen::Vector3i(i, j, k));
+        for (int i = -extra_safety_volume; i <= extra_safety_volume; i++)
+            for (int j = -extra_safety_volume; j <= extra_safety_volume; j++)
+                for (int k = -extra_safety_volume; k <= extra_safety_volume; k++)
+                    offset_list.push_back(Eigen::Vector3i(i, j, k));
+
+        Eigen::Vector3i d(
+            end_key.x - origin_key.x,
+            end_key.y - origin_key.y,
+            end_key.z - origin_key.z
+        );
+
+        std::vector<Eigen::Vector3i> idx_list;
+        get_bresenham_3d_from_origin(
+            d.x(), d.y(), d.z(), idx_list);
         
-        // Walk along the line segment with small steps, To include the last point + 1
-        for (std::size_t i = 0; i < nsteps + 1; i++) 
+        for (int i = 0; i < (int)idx_list.size(); i++) 
         {
-            Eigen::Vector3d p = origin + (direction * step_size * static_cast<float>(i));
-        
-            pcl::PointXYZ octree_p(p.x(), p.y(), p.z());
-        
-            pcl::octree::OctreeKey main_key;
-            gen_octree_key_for_point(octree_p, main_key);
-            // Not a new key, still the same voxel.
-            if ((main_key == prev_key))
-                continue;
-        
-            prev_key = main_key;
+            pcl::PointXYZ point;
+            pcl::octree::OctreeKey query_key(
+                origin_key.x + idx_list[i].x(),
+                origin_key.y + idx_list[i].y(),
+                origin_key.z + idx_list[i].z());
+            gen_leaf_node_center_from_octree_key(query_key, point);
 
-            // Check for surrounding voxels if the radius touches them
-            for (Eigen::Vector3i &offset : index)
+            for (Eigen::Vector3i &offset : offset_list)
             {
-                pcl::PointXYZ point;
-                pcl::octree::OctreeKey query_key(
-                    main_key.x + offset.x(),
-                    main_key.y + offset.y(),
-                    main_key.z + offset.z());
-                gen_leaf_node_center_from_octree_key(query_key, point);
+                pcl::octree::OctreeKey query_point(
+                    query_key.x + offset.x(),
+                    query_key.y + offset.y(),
+                    query_key.z + offset.z()
+                );
                 
-                Eigen::Vector3d point_eigen(point.x, point.y, point.z);
-                if ((point_eigen - p).norm() > param.r * 1.75)
-                    continue;
-
-                if (_octree.isVoxelOccupiedAtPoint(point))
+                if (i > 0)
                 {
-                    intersect = Eigen::Vector3d(point.x, point.y, point.z);
+                    if (abs(idx_list[i].x() + offset.x() - idx_list[i-1].x()) <= 1 &&
+                    abs(idx_list[i].y() + offset.y() - idx_list[i-1].y()) <= 1 &&
+                    abs(idx_list[i].z() + offset.z() - idx_list[i-1].z()) <= 1)
+                        continue;
+                }
+
+                pcl::PointXYZ neighbour_point;
+                gen_leaf_node_center_from_octree_key(
+                    query_point, neighbour_point);
+                if (_octree.isVoxelOccupiedAtPoint(neighbour_point))
+                {
+                    intersect = Eigen::Vector3d(
+                        point.x, point.y, point.z);
                     return false;
                 }
             }
@@ -354,39 +466,62 @@ namespace lro_rrt_server
         return true;
     }
 
-    /** *********************************
+    /** 
+     * @brief change_node_parent
+     * Swap and update the parent node
+    **/
+    void lro_rrt_server_node::change_node_parent(
+        Node* &node, Node* &parent, 
+        const double &cost_from_parent)
+    {
+        // Remove node from its parent's children list
+        if (node->parent)
+        {
+            for (auto i = node->parent->children.begin(); i != node->parent->children.end(); ++i) 
+            {
+                if (*i == node)
+                {
+                    node->parent->children.erase(i);
+                    break;
+                }
+            }
+        }
+        node->parent = parent;
+        node->cost_from_parent = cost_from_parent;
+        node->cost_from_start = parent->cost_from_start + cost_from_parent;
+        parent->children.push_back(node);
+
+        // for all its descedants, change the cost_from_start and tau_from_start;
+        Node *descendant(node);
+        std::queue<Node*> Q;
+        Q.push(descendant);
+        while (!Q.empty())
+        {
+            descendant = Q.front();
+            Q.pop();
+            for (const auto &leafptr : descendant->children)
+            {
+            leafptr->cost_from_start = leafptr->cost_from_parent + descendant->cost_from_start;
+            Q.push(leafptr);
+            }
+        }
+    }
+
+    /** 
+     * **********************************
      * **********************************
      * **********************************
      * private functions 
      * **********************************
      * **********************************
      * **********************************
-     * **/
+    **/
 
-    /** @brief get_nearest_node is responsible for finding the nearest node in the tree
-     * for a particular random node **/ 
-    inline int lro_rrt_server_node::get_nearest_node(Node random, Node base_node)
-    {
-        // We give dist a default value if total node is 1 it will fall back on this
-        double dist = (base_node.position - random.position).norm();
-        double min_dist = dist;
-        int linking_node = 0;
-
-        for(int i = 0; i < (int)nodes.size(); i++)
-        {
-            // Other nodes than start node
-            dist = (nodes[i]->position - random.position).norm();
-            // Evaluate distance
-            if(dist < min_dist)
-            {
-                min_dist = dist;
-                linking_node = i;
-            }
-        }
-        return linking_node;
-    }
-
-    /** @brief Adds in a random node and check for the validity **/
+    /** 
+     * @brief query_single_node
+     * Query a random node found by the sampler and 
+     * check for its validity 
+    **/
     void lro_rrt_server_node::query_single_node()
     {
         double eps = 0.00001;
@@ -401,8 +536,7 @@ namespace lro_rrt_server
                 min(max(random_vector.z(), param.h_c.first), param.h_c.second);
 
             // Check octree boundary, if it is exit from this loop
-            if (!point_within_aabb(
-                random_vector, search_param.mn_b, search_param.mx_b))
+            if (!is_point_within_octree(random_vector))
                 break;
             
             pcl::PointXYZ point(random_vector.x(), random_vector.y(), random_vector.z());
@@ -480,7 +614,7 @@ namespace lro_rrt_server
 
             current_node.is_checked = true;
             if (total_distance_from_start >= min_distance_from_start ||
-                !check_line_validity(current_node.node->position, step_node->position))
+                !get_line_validity(current_node.node->position, step_node->position))
             {
                 rejected_count++;
                 continue;
@@ -496,7 +630,7 @@ namespace lro_rrt_server
         /** @brief Debug message **/
         // std::cout << "Random_node = " << random_vector.transpose() << std::endl;
 
-        // if(!check_line_validity(
+        // if(!get_line_validity(
         //     nodes[index]->position, step_node->position))
         //     return;
         
@@ -514,7 +648,7 @@ namespace lro_rrt_server
             step_node->position.y(), step_node->position.z(), 
             step_node);
 
-        if (check_line_validity(step_node->position, end_node->position))
+        if (get_line_validity(step_node->position, end_node->position))
         {
             double dist_to_goal = 
                 (step_node->position - end_node->position).norm();
@@ -524,7 +658,8 @@ namespace lro_rrt_server
             if (is_better_path)
             {
                 change_node_parent(end_node, step_node, dist_to_goal);
-                std::vector<Eigen::Vector3d> path = path_extraction();
+                std::vector<Eigen::Vector3d> path = 
+                    extract_final_path(end_node);
                 reached = true;
             }
             return;
@@ -551,7 +686,7 @@ namespace lro_rrt_server
                 if (current_node.is_checked)
                     connected = current_node.is_valid;
                 else
-                    connected = check_line_validity(
+                    connected = get_line_validity(
                         step_node->position, current_node.node->position);
             
             if (connected)
@@ -563,15 +698,20 @@ namespace lro_rrt_server
             }
           }
         }
+        kd_res_free(neighbours);
     }
 
-    /** @brief Reorder then shorten the path by finding shortest obstacle free path through the nodes **/
+    /** 
+     * @brief extract_final_path
+     * Find the shortest obstacle free path through the nodes 
+     * when the goal node is reached
+    **/
     std::vector<Eigen::Vector3d> 
-        lro_rrt_server_node::path_extraction()
+        lro_rrt_server_node::extract_final_path(Node *n)
     {
         Node up, down;
-        down = *end_node;
-        up = *end_node->parent;
+        down = *n;
+        up = *n->parent;
         std::vector<Eigen::Vector3d> path;
 
         while(1)
@@ -584,70 +724,49 @@ namespace lro_rrt_server
         }
         path.push_back(search_param.s_e.first);
 
-        std::vector<Eigen::Vector3d> reordered_path = 
-            get_reorder_path(path);
-            
-        return reordered_path;
-
-        // for (int i = 0; i < (int)reordered_path.size(); i++)
-        //     std::cout << KCYN << reordered_path[i].transpose() << KNRM << std::endl;
-    }
-
-    /** @brief Reorder the path since the output of RRT is inverted **/
-    std::vector<Eigen::Vector3d> 
-    lro_rrt_server_node::get_reorder_path(std::vector<Eigen::Vector3d> path)
-    {
         std::vector<Eigen::Vector3d> reordered_path;
         for (int i = (int)path.size()-1; i >= 0; i--)
-            reordered_path.push_back(path[i]);            
-
+            reordered_path.push_back(path[i]); 
+            
         return reordered_path;
     }
 
-    /** @brief Shorten the RRT path by trimming the nodes **/
-    // std::vector<Eigen::Vector3d> 
-    // lro_rrt_server_node::get_shorten_path(std::vector<Eigen::Vector3d> path)
-    // {
-    //     std::vector<Eigen::Vector3d> shortened_path;
-    //     shortened_path.push_back(path[0]);
-
-    //     for (int i = 1; i < (int)path.size(); i++)
-    //     {
-    //         if (!check_line_validity(
-    //             shortened_path[(int)shortened_path.size()-1], path[i]))
-    //         {        
-    //             shortened_path.push_back(path[i-1]);
-    //         }
-    //     }   
-    //     shortened_path.push_back(path[path.size()-1]);      
-
-    //     return shortened_path;
-    // }
-
-    /** @brief Check if the point is within the AABB **/
-    bool lro_rrt_server_node::point_within_aabb(
-        Eigen::Vector3d point, Eigen::Vector3d min,
-        Eigen::Vector3d max)
+    /** 
+     * @brief is_point_within_octree
+     * Check if the point is within the octree 
+    **/
+    bool lro_rrt_server_node::is_point_within_octree(
+        Eigen::Vector3d point)
     {
         // Check octree boundary
-        if (point.x() < max.x() - param.r/2 && 
-            point.x() > min.x() + param.r/2 &&
-            point.y() < max.y() - param.r/2 && 
-            point.y() > min.y() + param.r/2 &&
-            point.z() < max.z() - param.r/2 && 
-            point.z() > min.z() + param.r/2)
+        if (point.x() < search_param.mx_b.x() - param.r/2 && 
+            point.x() > search_param.mn_b.x() + param.r/2 &&
+            point.y() < search_param.mx_b.y() - param.r/2 && 
+            point.y() > search_param.mn_b.y() + param.r/2 &&
+            point.z() < search_param.mx_b.z() - param.r/2 && 
+            point.z() > search_param.mn_b.z() + param.r/2)
             return true;
         else
             return false;
     }
 
-    /** @brief Constrain angle to between -pi to pi **/
-    double lro_rrt_server_node::constrain_between_180(double x)
+    /** 
+     * @brief gen_octree_key_for_point
+     * Edited from the protected function for octree
+     * void pcl::octree::OctreePointCloud<PointT, LeafContainerT, BranchContainerT, OctreeT>::
+     * genOctreeKeyforPoint(const PointT& point_arg, OctreeKey& key_arg) const
+    **/
+    void lro_rrt_server_node::gen_octree_key_for_point(
+        const pcl::PointXYZ point_arg, pcl::octree::OctreeKey& key_arg)
     {
-        x = fmod(x + M_PI,2*M_PI);
-        if (x < 0)
-            x += 2*M_PI;
-        return x - M_PI;
+        // calculate integer key for point coordinates
+        key_arg.x = static_cast<uint8_t>((point_arg.x - search_param.mn_b.x()) / param.r);
+        key_arg.y = static_cast<uint8_t>((point_arg.y - search_param.mn_b.y()) / param.r);
+        key_arg.z = static_cast<uint8_t>((point_arg.z - search_param.mn_b.z()) / param.r);
+        
+        assert(key_arg.x <= search_param.m_k[0]);
+        assert(key_arg.y <= search_param.m_k[1]);
+        assert(key_arg.z <= search_param.m_k[2]);
     }
 
 }
