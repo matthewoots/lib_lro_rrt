@@ -76,6 +76,10 @@ namespace lro_rrt_server
 
             std::vector<Node*> nodes;
             kdtree *kd_tree;
+            kdtree *store_tree;
+
+            vector<Eigen::Vector3d> vertices;
+            vector<std::pair<Eigen::Vector3d, Eigen::Vector3d>> edges;
 
             pcl::PointCloud<pcl::PointXYZ>::VectorType occupied_voxels;
 
@@ -98,7 +102,8 @@ namespace lro_rrt_server
              * @brief get_path
              * Main run function of the rrt module 
             **/ 
-            bool get_path(vector<Eigen::Vector3d> &output);
+            bool get_path(
+                vector<Eigen::Vector3d> &output, bool sample_tree);
 
             /** 
              * @brief get_line_validity
@@ -152,30 +157,7 @@ namespace lro_rrt_server
              * the path is still valid
             **/ 
             bool get_path_validity(
-                std::vector<Eigen::Vector3d> path)
-            {
-                // If it contains just 1 node which is its current point
-                if (path.size() == 1)
-                    return false;
-
-                // Check to see whether the new control point and the previous inputs
-                // have any pointclouds lying inside
-                int last_safe_idx = -1;
-                for (int i = 0; i < path.size()-1; i++)
-                {
-                    if (!get_line_validity(
-                        path[i], path[i+1]))
-                    {
-                        last_safe_idx = i;
-                        break;
-                    }
-                }
-
-                if (last_safe_idx >= 0)
-                    return false;
-                else
-                    return true;
-            }
+                std::vector<Eigen::Vector3d> path);
 
             /** 
              * @brief gen_leaf_node_center_from_octree_key
@@ -184,55 +166,7 @@ namespace lro_rrt_server
              * genLeafNodeCenterFromOctreeKey(const OctreeKey& key, PointT& point) const
             **/
             void gen_leaf_node_center_from_octree_key(
-                const pcl::octree::OctreeKey key, pcl::PointXYZ& point)
-            {
-                // define point to leaf node voxel center
-                point.x = static_cast<float>(
-                    (static_cast<double>(key.x) + 0.5f) * 
-                    param.r + search_param.mn_b.x());
-                point.y = static_cast<float>(
-                    (static_cast<double>(key.y) + 0.5f) * 
-                    param.r + search_param.mn_b.y());
-                point.z =static_cast<float>(
-                    (static_cast<double>(key.z) + 0.5f) * 
-                    param.r + search_param.mn_b.z());
-            }
-
-            
-
-            void extract_point_cloud_within_boundary(
-                Eigen::Vector3d c, double r, 
-                pcl::PointCloud<pcl::PointXYZ>::Ptr &pc)
-            {
-                pc->points.clear();
-                if (search_param.o_p == 0)
-                    return;
-
-                double rr = pow(r, 2);
-                for (auto &v : occupied_voxels)
-                {
-                    double xx = pow(v.x - c.x(), 2);
-                    double yy = pow(v.y - c.y(), 2);
-                    double zz = pow(v.z - c.z(), 2);
-                    if (xx + yy + zz < rr)
-                        pc->points.push_back(v);
-                }
-            }
-
-            void get_estimated_center_of_point(
-                Eigen::Vector3d p, Eigen::Vector3d &est)
-            {
-                Eigen::Vector3d dist = (search_param.mn_b - p);
-                Eigen::Vector3d v = (search_param.mn_b - p).normalized();
-                int nx = (int)round(abs(dist.x())/param.r);
-                int ny = (int)round(abs(dist.y())/param.r);
-                int nz = (int)round(abs(dist.z())/param.r);
-                est = Eigen::Vector3d(
-                    (nx + 0.5f)*param.r + search_param.mn_b.x(),
-                    (ny + 0.5f)*param.r + search_param.mn_b.y(),
-                    (nz + 0.5f)*param.r + search_param.mn_b.z()
-                );
-            }
+                const pcl::octree::OctreeKey key, pcl::PointXYZ& point);
 
             /** 
              * @brief change_node_parent
@@ -241,6 +175,11 @@ namespace lro_rrt_server
             void change_node_parent(
                 Node* &node, Node* &parent, 
                 const double &cost_from_parent);
+
+            void sample_whole_tree(Node* &root);
+
+            Node* get_safe_point_in_tree(
+                Node* root, double distance);
 
         private:
 
@@ -263,7 +202,7 @@ namespace lro_rrt_server
                 decltype(_octree)(0.1);
             
             /** @param p_c store pointcloud **/
-            pcl::PointCloud<pcl::PointXYZ>::Ptr p_c;
+            // pcl::PointCloud<pcl::PointXYZ>::Ptr p_c;
 
             /** 
              * @brief query_single_node

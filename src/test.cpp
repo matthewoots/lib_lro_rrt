@@ -47,20 +47,19 @@ int main()
     std::mt19937 generator(dev());
     lro_rrt_server::lro_rrt_server_node rrt;
     lro_rrt_server::lro_rrt_server_node::parameters rrt_param;
-    
-    rrt_param.m_s = 20.0; // map_size
+    double map_size = 20.0 // map_size
+    double p_z = 0.3; // protected_zone
     std::pair<double,double> height_constrain{0.0, 5.0};
     rrt_param.h_c = height_constrain;
     std::pair<double,double> runtime_error{0.020, 0.10};
     rrt_param.r_e = runtime_error;
     rrt_param.s_r = 4.0; // sensor_range
-    rrt_param.p_z = 0.3; // protected_zone
     rrt_param.r = 0.2; // pointcloud_resolution
     vector<Eigen::Vector4d> no_fly_zone;
     vector<Eigen::Vector3d> previous_input;
     pcl::PointCloud<pcl::PointXYZ>::Ptr obs_pcl (new pcl::PointCloud<pcl::PointXYZ>());
 
-    std::uniform_real_distribution<double> dis_middle(-rrt_param.m_s, rrt_param.m_s);
+    std::uniform_real_distribution<double> dis_middle(-map_size, map_size);
     std::uniform_real_distribution<double> dis_height(rrt_param.h_c.first, rrt_param.h_c.second);
 
     // Generate pointcloud data and produce AA cubes as obstacles
@@ -137,7 +136,7 @@ int main()
                     obs_pcl->points[(int)i].x - end.x(), 
                     obs_pcl->points[(int)i].y - end.y(), 
                     obs_pcl->points[(int)i].z - end.z());
-                if (start_diff.norm() < rrt_param.p_z * 1.5 || end_diff.norm() < rrt_param.p_z * 1.5 )
+                if (start_diff.norm() < p_z * 1.5 || end_diff.norm() < p_z * 1.5 )
                     break;
             }
 

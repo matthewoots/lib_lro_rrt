@@ -70,33 +70,30 @@ namespace lro_rrt_server
 
     /** 
     * @brief Global parameters for the RRT setup
-    * @param r_e
-    * @param h_c
-    * @param s_i
-    * @param s_r
-    * @param p_z
-    * @param s_l_h
-    * @param s_l_v
-    * @param s_d_n
-    * @param r
-    * @param m_s
-    * @param s_bf
-    * @param s_b
+    * @param r_e consist of _runtime_error
+    * @param h_c consist of _min_height and _max_height
+    * @param s_i search_interval
+    * @param s_r sensor_range
+    * @param s_l_h search_limit_hfov
+    * @param s_l_v search_limit_vfov
+    * @param s_d_n scaled_min_dist_from_node
+    * @param r resolution
+    * @param s_bf sensor_buffer_factor
+    * @param s_b sensor_buffer
+    * @param r_t refinement_time
     **/
     struct parameters 
     {
-        // @runtime_error : consist of _sub_runtime_error and _runtime_error
-        std::pair<double,double> r_e; 
+        // @runtime_error : consist of _runtime_error
+        double r_e; 
         // @height_constrain : consist of _min_height and _max_height
         std::pair<double,double> h_c; 
         double s_i; // @search_interval
         double s_r; // @sensor_range
-        double p_z; // @protected_zone
         std::pair<double,double> s_l_h; // @search_limit_hfov
         std::pair<double,double> s_l_v; // @search_limit_vfov
         double s_d_n; // @scaled_min_dist_from_node
         double r; // @resolution
-        double m_s; // @map_size
         double s_bf; // @sensor_buffer_factor
         double s_b; // @sensor_buffer
         double r_t; // @refinement_time

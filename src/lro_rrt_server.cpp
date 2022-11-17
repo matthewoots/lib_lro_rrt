@@ -49,11 +49,12 @@ namespace lro_rrt_server
      * @brief get_path
      * Main run function of the rrt module 
     **/ 
-    bool lro_rrt_server_node::get_path(vector<Eigen::Vector3d> &output)
+    bool lro_rrt_server_node::get_path(
+        vector<Eigen::Vector3d> &output, bool sample_tree)
     {
         std::lock_guard<std::mutex> octree_lock(octree_mutex);
 
-        output.clear();
+        output.clear();        
 
         // Check if we have valid start and end positions given
         if (search_param.s_e.first.norm() <= 1E-6 && search_param.s_e.second.norm() <= 1E-6)
@@ -112,103 +113,54 @@ namespace lro_rrt_server
         time_point<std::chrono::system_clock> fail_timer = system_clock::now();
         
         reached = false;
-        kdtree *store_tree;
-        Node *safe_node = new Node;
 
         int iteration = 0;
         // When there are points in the cloud
         if (search_param.o_p != 0) 
         {
-            while (duration<double>(system_clock::now() - fail_timer).count() < param.r_e.second)
+            time_point<std::chrono::system_clock> fail_sub_timer = system_clock::now();
+            iteration = 0;
+
+            kd_tree = kd_create(3);
+            int v = kd_insert3(
+                kd_tree, start_node->position.x(), 
+                start_node->position.y(), start_node->position.z(),
+                start_node);
+            
+            double time_offset = 0.0;
+            bool set_offset = false;
+            
+            // while(!reached)
+            while(1)
             {
-                time_point<std::chrono::system_clock> fail_sub_timer = system_clock::now();
-                iteration = 0;
-
-                kd_free(kd_tree);
-                kd_tree = kd_create(3);
-                int v = kd_insert3(
-                    kd_tree, start_node->position.x(), 
-                    start_node->position.y(), start_node->position.z(),
-                    start_node);
-                
-                double time_offset = 0.0;
-                bool set_offset = false;
-                
-                // while(!reached)
-                while(1)
-                {
-                    // time_point<std::chrono::system_clock> search_timer = system_clock::now();
-                    query_single_node();
-
-                    /** @brief Debug message **/
-                    // std::cout << "sub-search time(" << KBLU <<
-                    //    duration<double>(system_clock::now() - search_timer).count()*1000 << 
-                    //    KNRM << "ms" << std::endl;
-                    
-                    if (reached && !set_offset)
-                    {
-                        time_offset = 
-                            param.r_e.first - param.r_t -
-                            duration<double>(system_clock::now() - fail_sub_timer).count();
-                        set_offset = true;
-                    }
-                    
-                    if (duration<double>(system_clock::now() - 
-                        fail_sub_timer).count() + time_offset > param.r_e.first)
-                        break;
-                    
-                    iteration++;
-                }
+                // time_point<std::chrono::system_clock> search_timer = system_clock::now();
+                query_single_node();
 
                 /** @brief Debug message **/
-                std::cout << "sub_iterations(" << KBLU <<
-                    iteration << KNRM << ")" << std::endl;
+                // std::cout << "sub-search time(" << KBLU <<
+                //    duration<double>(system_clock::now() - search_timer).count()*1000 << 
+                //    KNRM << "ms" << std::endl;
                 
-                Eigen::Vector3d r_v = 
-                    (sampler.get_rand_point_in_circle()).normalized() * param.s_r/2.0;
-                double range = param.s_r;
-                struct kdres *neighbours;
-
-                neighbours = kd_nearest_range3(
-                    kd_tree, start_node->position.x() + r_v.x(), 
-                    start_node->position.y() + r_v.y(), 
-                    start_node->position.z() + r_v.z(), range);
-
-                // printf("neighbours %d\n", kd_res_size(neighbours));
-                
-                // Check whether there is no valid nodes at all
-                if (kd_res_size(neighbours) == 1)
+                if (reached && !set_offset)
                 {
-                    std::cout << KRED << "[no valid] fail to find path, return false" << KNRM << std::endl;
-                    return false;
+                    time_offset = 
+                        param.r_e - param.r_t -
+                        duration<double>(system_clock::now() - fail_sub_timer).count();
+                    set_offset = true;
                 }
-                // double accepted_neighbour_count = 20;
-                // int count = 0;
-                // double best_distance_from_start = -FLT_MAX;
                 
-                // while (!kd_res_end(neighbours) && count < 
-                //     accepted_neighbour_count)
-                // {
-                //     // double pos[3];
-                //     Node *c_n = (Node*)kd_res_item_data(neighbours);
-                //     printf("cost from start %lf count %d\n", 
-                //         c_n->cost_from_start, count);
-                //     if (c_n->cost_from_start > best_distance_from_start && 
-                //         c_n->parent != nullptr)
-                //     {
-                //         safe_node = c_n;
-                //         best_distance_from_start = c_n->cost_from_start;
-                //     }
-                //     // store range query result so that we dont need to query again for rewire;
-                //     kd_res_next(neighbours); // go to next in kd tree range query result
-                //     count++;
-                // }
-                // printf("best neighbour with cost from start %lf count %d\n", 
-                //     best_distance_from_start, count);
-
-                if (reached)
+                if (duration<double>(system_clock::now() - 
+                    fail_sub_timer).count() + time_offset > param.r_e)
                     break;
+                
+                iteration++;
             }
+
+            /** @brief Debug message **/
+            std::cout << "iterations(" << KBLU <<
+                iteration << KNRM << ")" << std::endl;
+
+            store_tree = kd_tree;
         }
         // When there are no points in the cloud
         else
@@ -216,15 +168,35 @@ namespace lro_rrt_server
             reached = true;
             end_node->parent = start_node;
             nodes.push_back(end_node);
-            // (end_node->children).push_back(end_node);
+
+            std::cout << (reached ? "Successful" : "Unsuccessful") << " search complete after " << 
+                duration<double>(system_clock::now() - fail_timer).count()*1000 << "ms" << std::endl;
+
+            nodes.push_back(end_node);
+
+            output = extract_final_path(end_node);
+
+            std::cout << "intermediate_nodes(" << KBLU << nodes.size() - 2 << KNRM
+                ") iterations(" << KBLU << iteration << KNRM << ") path_size(" << 
+                KBLU << output.size()-2 << KNRM << ")" << std::endl;
+
+            return true;
         }
         std::cout << (reached ? "Successful" : "Unsuccessful") << " search complete after " << 
             duration<double>(system_clock::now() - fail_timer).count()*1000 << "ms" << std::endl;
 
         if (!reached)
         {
+            Node *safe_node = new Node;
             std::cout << KRED << "[use safe path] fail to find path, return false" << KNRM << std::endl;
-            output = extract_final_path(safe_node);
+            // safe_node = get_safe_point_in_tree(start_node, 4.0);
+            // printf("here\n");
+            // output = extract_final_path(safe_node);
+            // sample_whole_tree(start_node);
+            // std::cout << KRED << "vertices(" << vertices.size() << ")" << std::endl;
+            // std::cout << KRED << "edges size(" << edges.size() << ")" << std::endl;
+            // assert((int)vertices.size() > 0);
+            // assert((int)edges.size() > 0);
             return false;
         }
         
@@ -232,9 +204,14 @@ namespace lro_rrt_server
 
         output = extract_final_path(end_node);
 
+        if (sample_tree)
+            sample_whole_tree(start_node);
+
         std::cout << "intermediate_nodes(" << KBLU << nodes.size() - 2 << KNRM
             ") iterations(" << KBLU << iteration << KNRM << ") path_size(" << 
             KBLU << output.size()-2 << KNRM << ")" << std::endl;
+
+        kd_free(kd_tree);
 
         return true;
     }
@@ -358,7 +335,7 @@ namespace lro_rrt_server
         _octree.setInputCloud(obs_pcl);
         _octree.addPointsFromInputCloud();
 
-        p_c = obs_pcl;
+        // p_c = obs_pcl;
         
         /** @brief Debug message **/
         // std::cout << "pointcloud size (" << obs_pcl->points.size() << ")" << std::endl;
@@ -409,7 +386,7 @@ namespace lro_rrt_server
 
         vector<Eigen::Vector3i> offset_list;
         
-        int extra_safety_volume = 1;
+        int extra_safety_volume = 2;
         // Setup the neighbouring boxes
         for (int i = -extra_safety_volume; i <= extra_safety_volume; i++)
             for (int j = -extra_safety_volume; j <= extra_safety_volume; j++)
@@ -445,9 +422,9 @@ namespace lro_rrt_server
                 
                 if (i > 0)
                 {
-                    if (abs(idx_list[i].x() + offset.x() - idx_list[i-1].x()) <= 1 &&
-                    abs(idx_list[i].y() + offset.y() - idx_list[i-1].y()) <= 1 &&
-                    abs(idx_list[i].z() + offset.z() - idx_list[i-1].z()) <= 1)
+                    if (abs(idx_list[i].x() + offset.x() - idx_list[i-1].x()) <= extra_safety_volume &&
+                    abs(idx_list[i].y() + offset.y() - idx_list[i-1].y()) <= extra_safety_volume &&
+                    abs(idx_list[i].z() + offset.z() - idx_list[i-1].z()) <= extra_safety_volume)
                         continue;
                 }
 
@@ -464,6 +441,58 @@ namespace lro_rrt_server
         }
         
         return true;
+    }
+
+    /** 
+     * @brief get_path_validity
+     * Check the pairs of points in the path and return whether 
+     * the path is still valid
+    **/ 
+    bool lro_rrt_server_node::get_path_validity(
+        std::vector<Eigen::Vector3d> path)
+    {
+        // If it contains just 1 node which is its current point
+        if (path.size() == 1)
+            return false;
+
+        // Check to see whether the new control point and the previous inputs
+        // have any pointclouds lying inside
+        int last_safe_idx = -1;
+        for (size_t i = 0; i < path.size()-1; i++)
+        {
+            if (!get_line_validity(
+                path[i], path[i+1]))
+            {
+                last_safe_idx = (int)i;
+                break;
+            }
+        }
+
+        if (last_safe_idx >= 0)
+            return false;
+        else
+            return true;
+    }
+
+    /** 
+     * @brief gen_leaf_node_center_from_octree_key
+     * Edited from the protected function for octree
+     * void pcl::octree::OctreePointCloud<PointT, LeafContainerT, BranchContainerT, OctreeT>::
+     * genLeafNodeCenterFromOctreeKey(const OctreeKey& key, PointT& point) const
+    **/
+    void lro_rrt_server_node::gen_leaf_node_center_from_octree_key(
+        const pcl::octree::OctreeKey key, pcl::PointXYZ& point)
+    {
+        // define point to leaf node voxel center
+        point.x = static_cast<float>(
+            (static_cast<double>(key.x) + 0.5f) * 
+            param.r + search_param.mn_b.x());
+        point.y = static_cast<float>(
+            (static_cast<double>(key.y) + 0.5f) * 
+            param.r + search_param.mn_b.y());
+        point.z =static_cast<float>(
+            (static_cast<double>(key.z) + 0.5f) * 
+            param.r + search_param.mn_b.z());
     }
 
     /** 
@@ -501,8 +530,8 @@ namespace lro_rrt_server
             Q.pop();
             for (const auto &leafptr : descendant->children)
             {
-            leafptr->cost_from_start = leafptr->cost_from_parent + descendant->cost_from_start;
-            Q.push(leafptr);
+                leafptr->cost_from_start = leafptr->cost_from_parent + descendant->cost_from_start;
+                Q.push(leafptr);
             }
         }
     }
@@ -524,8 +553,6 @@ namespace lro_rrt_server
     **/
     void lro_rrt_server_node::query_single_node()
     {
-        double eps = 0.00001;
-
         Node* step_node = new Node;
         Eigen::Vector3d random_vector;
         while (1)
@@ -671,7 +698,7 @@ namespace lro_rrt_server
         for (auto &current_node : neighbour_nodes)
         {
             double dist_to_potential_child = 
-                (step_node->position, current_node.node->position).norm();
+                (step_node->position - current_node.node->position).norm();
             bool not_consistent = 
                 step_node->cost_from_start + dist_to_potential_child < 
                 current_node.node->cost_from_start ? true : false;
@@ -691,7 +718,7 @@ namespace lro_rrt_server
             
             if (connected)
             {
-                double best_cost_before_rewire = end_node->cost_from_start;
+                // double best_cost_before_rewire = end_node->cost_from_start;
                 change_node_parent(
                     current_node.node, step_node, 
                     dist_to_potential_child);
@@ -729,6 +756,55 @@ namespace lro_rrt_server
             reordered_path.push_back(path[i]); 
             
         return reordered_path;
+    }
+
+    void lro_rrt_server_node::sample_whole_tree(Node* &root)
+    {
+        vertices.clear();
+        edges.clear();
+
+        // whatever dfs or bfs
+        Node *node(root);
+        std::queue<Node*> Q;
+        Q.push(node);
+        while (!Q.empty())
+        {
+            node = Q.front();
+            Q.pop();
+            for (const auto &leafptr : node->children)
+            {
+                vertices.push_back(leafptr->position);
+                edges.emplace_back(
+                    std::make_pair(node->position, leafptr->position));
+                Q.push(leafptr);
+            }
+        }
+    }
+
+    Node* lro_rrt_server_node::get_safe_point_in_tree(
+        Node* root, double distance)
+    {
+        // whatever dfs or bfs
+        Node node = *root;
+        std::queue<Node> Q;
+        Q.push(node);
+        int count = 0;
+        while (!Q.empty())
+        {
+            node = Q.front();
+            Q.pop();
+            for (const auto &leafptr : node.children)
+            {
+                count++;
+                printf("here %d\n", count);
+                if (leafptr->cost_from_start > distance)
+                {
+                    printf("found\n");
+                    return leafptr;
+                }
+                Q.push(*leafptr);
+            }
+        }
     }
 
     /** 
