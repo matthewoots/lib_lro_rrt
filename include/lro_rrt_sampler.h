@@ -135,7 +135,8 @@ namespace lro_rrt_server
                     sin(a), cos(a), 0,
                     0, 0, 1;
                 double theta = cir.hfov(generator) * 2.0*M_PI;
-                double phi = cir.vfov(generator) * M_PI;
+                // double phi = cir.vfov(generator) * M_PI;
+                double phi = acos(2.0 * cir.vfov(generator) - 1.0);
                 double r = cir.range(generator);
                 double sin_theta = sin(theta); 
                 double cos_theta = cos(theta);

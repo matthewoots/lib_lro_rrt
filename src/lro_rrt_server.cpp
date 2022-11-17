@@ -90,7 +90,16 @@ namespace lro_rrt_server
         }
 
         // Initialize variables for RRT (reset)
-        nodes.clear();
+        if (!nodes.empty())
+        {
+            for (size_t i = 0; i < nodes.size(); i++)
+            {
+                /** @brief Debug message **/
+                // printf("deleted %d/%d\n", i, (nodes.size()-1));
+                delete nodes[i];
+            }
+            nodes.clear();
+        }
 
         start_node = new Node;
         start_node->position = search_param.s_e.first;
@@ -159,8 +168,6 @@ namespace lro_rrt_server
             /** @brief Debug message **/
             std::cout << "iterations(" << KBLU <<
                 iteration << KNRM << ")" << std::endl;
-
-            store_tree = kd_tree;
         }
         // When there are no points in the cloud
         else
@@ -172,8 +179,6 @@ namespace lro_rrt_server
             std::cout << (reached ? "Successful" : "Unsuccessful") << " search complete after " << 
                 duration<double>(system_clock::now() - fail_timer).count()*1000 << "ms" << std::endl;
 
-            nodes.push_back(end_node);
-
             output = extract_final_path(end_node);
 
             std::cout << "intermediate_nodes(" << KBLU << nodes.size() - 2 << KNRM
@@ -182,6 +187,7 @@ namespace lro_rrt_server
 
             return true;
         }
+
         std::cout << (reached ? "Successful" : "Unsuccessful") << " search complete after " << 
             duration<double>(system_clock::now() - fail_timer).count()*1000 << "ms" << std::endl;
 
@@ -189,17 +195,14 @@ namespace lro_rrt_server
         {
             Node *safe_node = new Node;
             std::cout << KRED << "[use safe path] fail to find path, return false" << KNRM << std::endl;
-            // safe_node = get_safe_point_in_tree(start_node, 4.0);
-            // printf("here\n");
-            // output = extract_final_path(safe_node);
-            // sample_whole_tree(start_node);
-            // std::cout << KRED << "vertices(" << vertices.size() << ")" << std::endl;
-            // std::cout << KRED << "edges size(" << edges.size() << ")" << std::endl;
-            // assert((int)vertices.size() > 0);
-            // assert((int)edges.size() > 0);
+            safe_node = get_safe_point_in_tree(start_node, 4.0);
+            
+            if (safe_node != nullptr)
+                output = extract_final_path(safe_node);
+            
             return false;
         }
-        
+
         nodes.push_back(end_node);
 
         output = extract_final_path(end_node);
@@ -614,7 +617,7 @@ namespace lro_rrt_server
             return;
         
         std::vector<node_status_check> neighbour_nodes;
-        double accepted_neighbour_count = 20, count = 0, rejected_count = 0;
+        double accepted_neighbour_count = 10, count = 0, rejected_count = 0;
         neighbour_nodes.reserve(accepted_neighbour_count);
 
         while (!kd_res_end(neighbours) && count < accepted_neighbour_count)
@@ -785,25 +788,31 @@ namespace lro_rrt_server
         Node* root, double distance)
     {
         // whatever dfs or bfs
-        Node node = *root;
-        std::queue<Node> Q;
+        Node *node(root);
+        std::queue<Node*> Q;
         Q.push(node);
-        int count = 0;
+        
+        if ((root->children).empty())
+        {
+            std::cout << KGRN << "no children" << KNRM << std::endl;
+            return nullptr;
+        }
+
         while (!Q.empty())
         {
             node = Q.front();
             Q.pop();
-            for (const auto &leafptr : node.children)
-            {
-                count++;
-                printf("here %d\n", count);
-                if (leafptr->cost_from_start > distance)
-                {
-                    printf("found\n");
-                    return leafptr;
+
+            if(!node->children.empty())
+                for (const auto &leafptr : node->children)
+                {            
+                    if (leafptr->cost_from_start > distance)
+                    {
+                        std::cout << KGRN << "found safe leaf" << KNRM << std::endl;
+                        return leafptr;
+                    }
+                    Q.push(leafptr);
                 }
-                Q.push(*leafptr);
-            }
         }
     }
 

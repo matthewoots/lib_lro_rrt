@@ -76,7 +76,6 @@ namespace lro_rrt_server
 
             std::vector<Node*> nodes;
             kdtree *kd_tree;
-            kdtree *store_tree;
 
             vector<Eigen::Vector3d> vertices;
             vector<std::pair<Eigen::Vector3d, Eigen::Vector3d>> edges;
