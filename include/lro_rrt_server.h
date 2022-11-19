@@ -65,6 +65,8 @@ using namespace std::chrono;
 #define KCYN  "\033[36m"
 #define KWHT  "\033[37m"
 
+typedef time_point<std::chrono::system_clock> t_p_sc; // giving a typename
+
 namespace lro_rrt_server
 {
 
@@ -77,8 +79,9 @@ namespace lro_rrt_server
             std::vector<Node*> nodes;
             kdtree *kd_tree;
 
-            vector<Eigen::Vector3d> vertices;
-            vector<std::pair<Eigen::Vector3d, Eigen::Vector3d>> edges;
+            std::vector<Eigen::Vector3d> global_path;
+            std::vector<Eigen::Vector3d> vertices;
+            std::vector<std::pair<Eigen::Vector3d, Eigen::Vector3d>> edges;
 
             pcl::PointCloud<pcl::PointXYZ>::VectorType occupied_voxels;
 
@@ -124,6 +127,69 @@ namespace lro_rrt_server
              * Setup the parameters for the rrt 
             **/ 
             void set_parameters(parameters parameter);
+
+            /** 
+             * @brief get_receding_path
+            **/ 
+            void get_receding_path(
+                Eigen::Vector3d point, double distance,
+                std::vector<Eigen::Vector3d> &output)
+            {
+                output.clear();
+
+                double min_dist = FLT_MAX;
+                int index = 0;
+
+                if (global_path.empty())
+                    return;
+                
+                for (size_t i = 1; i < global_path.size(); i++)
+                {
+                    double line_dist;
+                    Eigen::Vector3d v;
+                    get_nearest_distance_to_line(
+                        point, global_path[i-1], global_path[i], 
+                        line_dist, v);
+
+                    if (line_dist < min_dist)
+                    {
+                        index = i;
+                        min_dist = line_dist;
+                    }
+                }
+
+                printf("index %d\n", index);
+
+                std::vector<Eigen::Vector3d> tmp;
+
+                double travel_dist = 0.0, previous;
+                tmp.push_back(point);
+                for (int i = index; i < (int)global_path.size(); i++)
+                {
+                    previous = travel_dist;
+                    travel_dist += 
+                        (tmp.back() - global_path[i]).norm();
+
+                    printf("%d travel_dist %lf/%lf\n", i, 
+                        travel_dist, distance);
+                    if (travel_dist <= distance)
+                        tmp.push_back(global_path[i]);
+                    else
+                    {
+                        Eigen::Vector3d dir_vector = 
+                            (global_path[i] - tmp.back()).normalized();
+                        double leftover = 
+                            abs(previous - distance);
+                        
+                        tmp.push_back(
+                            tmp.back() + dir_vector * leftover);
+                        
+                        break;
+                    }
+                }
+
+                get_discretized_path(tmp, output);
+            }
 
             /** 
              * @brief set_no_fly_zone
@@ -233,6 +299,22 @@ namespace lro_rrt_server
             **/
             void gen_octree_key_for_point(
                 const pcl::PointXYZ point_arg, pcl::octree::OctreeKey& key_arg);
+    
+            Node* get_nearest_neighbour(Eigen::Vector3d p)
+            {
+                struct kdres *nn = kd_nearest3(
+                kd_tree, p.x(), p.y(), p.z());
+                if (nn == nullptr)
+                {
+                    std::cout << KRED << "nearest query error" << KNRM << std::endl;
+                    return nullptr;
+                }
+
+                Node* nearest_node = (Node*)kd_res_item_data(nn);
+                kd_res_free(nn);
+
+                return nearest_node;
+            }
     };
 }
 

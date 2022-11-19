@@ -54,7 +54,8 @@ namespace lro_rrt_server
     {
         std::lock_guard<std::mutex> octree_lock(octree_mutex);
 
-        output.clear();        
+        output.clear(); 
+        global_path.clear();       
 
         // Check if we have valid start and end positions given
         if (search_param.s_e.first.norm() <= 1E-6 && search_param.s_e.second.norm() <= 1E-6)
@@ -185,6 +186,8 @@ namespace lro_rrt_server
                 ") iterations(" << KBLU << iteration << KNRM << ") path_size(" << 
                 KBLU << output.size()-2 << KNRM << ")" << std::endl;
 
+            global_path = output;
+
             return true;
         }
 
@@ -198,14 +201,19 @@ namespace lro_rrt_server
             safe_node = get_safe_point_in_tree(start_node, 4.0);
             
             if (safe_node != nullptr)
+            {
                 output = extract_final_path(safe_node);
-            
+                global_path = output;
+            }
+
             return false;
         }
 
         nodes.push_back(end_node);
 
         output = extract_final_path(end_node);
+
+        global_path = output;
 
         if (sample_tree)
             sample_whole_tree(start_node);
@@ -560,7 +568,20 @@ namespace lro_rrt_server
         Eigen::Vector3d random_vector;
         while (1)
         {
-            random_vector = sampler.get_rand_point_in_circle();
+            if (!reached)
+                random_vector = sampler.get_rand_point_in_circle();
+            else
+                random_vector = sampler.get_rand_point_in_circle();
+            
+            Node* nearest_node = 
+                get_nearest_neighbour(random_vector);
+
+            Eigen::Vector3d v = 
+                (random_vector - nearest_node->position).normalized(); 
+            
+            random_vector = 
+                nearest_node->position + v * 1.5;
+
             // Make sure to clamp the height
             random_vector.z() = 
                 min(max(random_vector.z(), param.h_c.first), param.h_c.second);
@@ -590,17 +611,9 @@ namespace lro_rrt_server
 
         step_node->position = random_vector;
         
-        struct kdres *nn = kd_nearest3(
-            kd_tree, random_vector.x(), random_vector.y(), random_vector.z());
-        if (nn == nullptr)
-        {
-          std::cout << KRED << "nearest query error" << KNRM << std::endl;
-          return;
-        }
-
-        Node* nearest_node = (Node*)kd_res_item_data(nn);
-        // int index = nearest_node->index;
-        kd_res_free(nn);
+        Node* nearest_node = 
+            get_nearest_neighbour(random_vector);
+        
         // int index = get_nearest_node(*step_node, *start_node);
         double min_distance_to_node = 
             (nearest_node->position - random_vector).norm();
@@ -688,8 +701,6 @@ namespace lro_rrt_server
             if (is_better_path)
             {
                 change_node_parent(end_node, step_node, dist_to_goal);
-                std::vector<Eigen::Vector3d> path = 
-                    extract_final_path(end_node);
                 reached = true;
             }
             return;
@@ -729,6 +740,25 @@ namespace lro_rrt_server
           }
         }
         kd_res_free(neighbours);
+
+        // if (reached)
+        // {
+        //     std::vector<Eigen::Vector3d> path = 
+        //         extract_final_path(end_node);
+            
+        //     Eigen::Vector3d avg_point = Eigen::Vector3d::Zero();
+        //     for (size_t i = 1; i < path.size()-1; i++)
+        //         avg_point += path[i];
+            
+        //     avg_point = avg_point / ((path.size()-1)-1);
+
+        //     Eigen::Vector3d direction = 
+        //         (avg_point - start_node->position).normalized();
+
+        //     sampler = {};
+        //     sampler.set_constrained_circle_parameters(
+        //         search_param.s_e, param.s_d_n, param.s_b, param.s_l_h, param.s_l_v);
+        // }
     }
 
     /** 
