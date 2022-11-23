@@ -198,13 +198,19 @@ namespace lro_rrt_server
         {
             Node *safe_node = new Node;
             std::cout << KRED << "[use safe path] fail to find path, return false" << KNRM << std::endl;
-            safe_node = get_safe_point_in_tree(start_node, 4.0);
-            
+            // safe_node = get_safe_point_in_tree(start_node, 4.0);
+            safe_node = nullptr;
+
             if (safe_node != nullptr)
             {
                 output = extract_final_path(safe_node);
                 global_path = output;
             }
+            else
+                std::cout << KRED << 
+                    "start_node does not have children" << KNRM << std::endl;
+                
+            std::cout << KRED << "extract last safe path" << KNRM << std::endl;
 
             return false;
         }
@@ -817,25 +823,42 @@ namespace lro_rrt_server
     Node* lro_rrt_server_node::get_safe_point_in_tree(
         Node* root, double distance)
     {
-        // whatever dfs or bfs
-        Node *node(root);
-        std::queue<Node*> Q;
-        Q.push(node);
+        if (root == nullptr)
+            return nullptr;
         
         if ((root->children).empty())
         {
             std::cout << KGRN << "no children" << KNRM << std::endl;
             return nullptr;
         }
+        
+        // whatever dfs or bfs
+        Node *node(root);
+        std::queue<Node*> Q;
+        Q.push(node);
 
+        int count = 0;
         while (!Q.empty())
         {
-            node = Q.front();
-            Q.pop();
-
+            count++;
+            std::cout << KGRN << count << KNRM << std::endl;
+            if (node == nullptr)
+            {
+                Q.pop();
+                continue;
+            }
+            else
+            {
+                node = Q.front();
+                Q.pop();
+            }
+            
             if(!node->children.empty())
+            {
+                printf("children %d\n", (int)node->children.size());
                 for (const auto &leafptr : node->children)
-                {            
+                {
+                    std::cout << KGRN << "leaf of " << count << KNRM << std::endl;            
                     if (leafptr->cost_from_start > distance)
                     {
                         std::cout << KGRN << "found safe leaf" << KNRM << std::endl;
@@ -843,6 +866,7 @@ namespace lro_rrt_server
                     }
                     Q.push(leafptr);
                 }
+            }
         }
     }
 
