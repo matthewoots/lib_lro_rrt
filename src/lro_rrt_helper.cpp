@@ -144,7 +144,7 @@ namespace lro_rrt_server
             Eigen::Vector3d difference = input[i] - input[i-1];
             
             norm_vector.push_back(difference.norm());
-            seg_vector.push_back((int)round(difference.norm() / (1.25)));
+            seg_vector.push_back((int)round(difference.norm() / (0.25)));
             dir_vector.push_back(difference.normalized());
         }
 
