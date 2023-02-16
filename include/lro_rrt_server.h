@@ -65,6 +65,8 @@ using namespace std::chrono;
 #define KCYN  "\033[36m"
 #define KWHT  "\033[37m"
 
+#define EXPANSION 1
+
 typedef time_point<std::chrono::system_clock> t_p_sc; // giving a typename
 
 namespace lro_rrt_server
@@ -89,7 +91,10 @@ namespace lro_rrt_server
              * @brief lro_rrt_server_node
              * Constructor of the RRT node
             **/ 
-            lro_rrt_server_node(){}
+            lro_rrt_server_node()
+            {
+                offset_list = create_expanded_list(EXPANSION);
+            }
 
             /** 
              * @brief ~lro_rrt_server_node
@@ -198,12 +203,19 @@ namespace lro_rrt_server
             void set_no_fly_zone(vector<Eigen::Vector4d> no_fly_zone);
 
             /** 
-             * @brief update_pose_and_octree
-             * Update the pose and the octree, since the octree is centered 
+             * @brief update_pose_goal
+             * Update the pose and goal
+            **/
+            void update_pose_goal(
+                Eigen::Vector3d p, Eigen::Vector3d q);
+
+            /** 
+             * @brief update_octree
+             * Update the octree, the octree is centered 
              * around the pose due to perception range 
             **/ 
-            void update_pose_and_octree(
-                pcl::PointCloud<pcl::PointXYZ>::Ptr obs_pcl, Eigen::Vector3d p, Eigen::Vector3d q);
+            void update_octree(
+                pcl::PointCloud<pcl::PointXYZ>::Ptr obs_pcl);
             
             /** 
              * @brief check_approx_intersection_by_segment
@@ -246,6 +258,12 @@ namespace lro_rrt_server
             Node* get_safe_point_in_tree(
                 Node* root, double distance);
 
+            /** 
+             * @brief check_trajectory_collision
+            **/ 
+            bool check_trajectory_collision(
+                std::vector<Eigen::Vector3d> traj, int &index);
+
         private:
 
             std::mutex octree_mutex; 
@@ -258,6 +276,8 @@ namespace lro_rrt_server
 
             bool reached = false;
             bool init = false;
+
+            vector<Eigen::Vector3i> offset_list;
             
             /** @param sampler initialize the sampling node **/
             lro_rrt_server::sampler_node sampler;
@@ -266,8 +286,11 @@ namespace lro_rrt_server
             pcl::octree::OctreePointCloudSearch<pcl::PointXYZ> _octree = 
                 decltype(_octree)(0.1);
             
-            /** @param p_c store pointcloud **/
-            // pcl::PointCloud<pcl::PointXYZ>::Ptr p_c;
+            /** 
+             * @brief create_expanded_list
+            **/ 
+            std::vector<Eigen::Vector3i> 
+                create_expanded_list(int extra);
 
             /** 
              * @brief query_single_node
@@ -290,6 +313,13 @@ namespace lro_rrt_server
             **/
             bool is_point_within_octree(
                 Eigen::Vector3d point);
+            
+            /** 
+             * @brief is_index_within_octree
+             * Check if the index is within the octree 
+            **/
+            bool is_index_within_octree(
+                pcl::octree::OctreeKey idx);
 
             /** 
              * @brief gen_octree_key_for_point

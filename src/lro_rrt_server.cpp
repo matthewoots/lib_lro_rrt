@@ -335,17 +335,25 @@ namespace lro_rrt_server
     }
 
     /** 
-     * @brief update_pose_and_octree
-     * Update the pose and the octree, since the octree is centered 
-     * around the pose due to perception range 
-    **/ 
-    void lro_rrt_server_node::update_pose_and_octree(
-        pcl::PointCloud<pcl::PointXYZ>::Ptr obs_pcl, Eigen::Vector3d p, Eigen::Vector3d q)
-    {
-        std::lock_guard<std::mutex> octree_lock(octree_mutex);
-
+     * @brief update_pose_goal
+     * Update the pose and goal
+    **/
+    void lro_rrt_server_node::update_pose_goal(
+        Eigen::Vector3d p, Eigen::Vector3d q)
+    {   
         search_param.s_e.first = p;
         search_param.s_e.second = q;
+    }
+
+    /** 
+     * @brief update_octree
+     * Update the octree, the octree is centered 
+     * around the pose due to perception range 
+    **/ 
+    void lro_rrt_server_node::update_octree(
+        pcl::PointCloud<pcl::PointXYZ>::Ptr obs_pcl)
+    {
+        std::lock_guard<std::mutex> octree_lock(octree_mutex);
 
         _octree.deleteTree();
         
@@ -401,15 +409,6 @@ namespace lro_rrt_server
         gen_octree_key_for_point(octree_origin, origin_key);
         gen_octree_key_for_point(octree_end, end_key);
 
-        vector<Eigen::Vector3i> offset_list;
-        
-        int extra_safety_volume = 2;
-        // Setup the neighbouring boxes
-        for (int i = -extra_safety_volume; i <= extra_safety_volume; i++)
-            for (int j = -extra_safety_volume; j <= extra_safety_volume; j++)
-                for (int k = -extra_safety_volume; k <= extra_safety_volume; k++)
-                    offset_list.push_back(Eigen::Vector3i(i, j, k));
-
         Eigen::Vector3i d(
             end_key.x - origin_key.x,
             end_key.y - origin_key.y,
@@ -421,8 +420,9 @@ namespace lro_rrt_server
             d.x(), d.y(), d.z(), idx_list);
         
         for (int i = 0; i < (int)idx_list.size(); i++) 
-        {
+        {            
             pcl::PointXYZ point;
+            // Fall back to find the root of the expanded volume
             pcl::octree::OctreeKey query_key(
                 origin_key.x + idx_list[i].x(),
                 origin_key.y + idx_list[i].y(),
@@ -436,12 +436,15 @@ namespace lro_rrt_server
                     query_key.y + offset.y(),
                     query_key.z + offset.z()
                 );
+
+                if (!is_index_within_octree(query_point))
+                    continue;
                 
                 if (i > 0)
                 {
-                    if (abs(idx_list[i].x() + offset.x() - idx_list[i-1].x()) <= extra_safety_volume &&
-                    abs(idx_list[i].y() + offset.y() - idx_list[i-1].y()) <= extra_safety_volume &&
-                    abs(idx_list[i].z() + offset.z() - idx_list[i-1].z()) <= extra_safety_volume)
+                    if (abs(idx_list[i].x() + offset.x() - idx_list[i-1].x()) <= EXPANSION &&
+                    abs(idx_list[i].y() + offset.y() - idx_list[i-1].y()) <= EXPANSION &&
+                    abs(idx_list[i].z() + offset.z() - idx_list[i-1].z()) <= EXPANSION)
                         continue;
                 }
 
@@ -469,26 +472,93 @@ namespace lro_rrt_server
         std::vector<Eigen::Vector3d> path)
     {
         // If it contains just 1 node which is its current point
-        if (path.size() == 1)
+        if (path.size() < 2)
             return false;
 
         // Check to see whether the new control point and the previous inputs
         // have any pointclouds lying inside
-        int last_safe_idx = -1;
         for (size_t i = 0; i < path.size()-1; i++)
         {
-            if (!get_line_validity(
-                path[i], path[i+1]))
+            if (!get_line_validity(path[i], path[i+1]))
+                return false;
+        }
+        
+        return true;
+    }
+
+    /** 
+     * @brief create_expanded_list
+    **/ 
+    std::vector<Eigen::Vector3i> 
+        lro_rrt_server_node::create_expanded_list(int extra)
+    {
+        std::vector<Eigen::Vector3i> out;
+        // Setup the neighbouring boxes
+        for (int i = -extra; i <= extra; i++)
+            for (int j = -extra; j <= extra; j++)
+                for (int k = -extra; k <= extra; k++)
+                    out.push_back(Eigen::Vector3i(i, j, k));
+
+        return out;
+    }
+    
+
+    /** 
+     * @brief check_trajectory_collision
+    **/ 
+    bool lro_rrt_server_node::check_trajectory_collision(
+        std::vector<Eigen::Vector3d> traj, int &index)
+    {
+        if (traj.empty())
+            return true;
+        
+        pcl::octree::OctreeKey previous_key;
+        for (size_t i = 0; i < traj.size(); i++)
+        {
+            pcl::octree::OctreeKey octree_key;
+            pcl::PointXYZ octree_point(
+                traj[i].x(), traj[i].y(), traj[i].z());
+                
+            gen_octree_key_for_point(octree_point, octree_key);
+
+            if (previous_key == octree_key)
+                continue;
+            else
+                previous_key = octree_key;
+
+            for (Eigen::Vector3i &offset : offset_list)
             {
-                last_safe_idx = (int)i;
-                break;
+                pcl::octree::OctreeKey query_point(
+                    octree_key.x + offset.x(),
+                    octree_key.y + offset.y(),
+                    octree_key.z + offset.z()
+                );
+
+                if (!is_index_within_octree(query_point))
+                    continue;
+                
+                if (i > 0)
+                {
+                    if (abs(traj[i].x() + offset.x() - traj[i-1].x()) <= EXPANSION &&
+                    abs(traj[i].y() + offset.y() - traj[i-1].y()) <= EXPANSION &&
+                    abs(traj[i].z() + offset.z() - traj[i-1].z()) <= EXPANSION)
+                        continue;
+                }
+
+                pcl::PointXYZ neighbour_point;
+                gen_leaf_node_center_from_octree_key(
+                    query_point, neighbour_point);
+                if (_octree.isVoxelOccupiedAtPoint(neighbour_point))
+                {
+                    index = i;
+                    return true;
+                }
+
+                // std::cout << "point (" << neighbour_point.x << 
+                //     " " << neighbour_point.y << " " << neighbour_point.z << ")" << std::endl;
             }
         }
-
-        if (last_safe_idx >= 0)
-            return false;
-        else
-            return true;
+        return false;
     }
 
     /** 
@@ -890,6 +960,25 @@ namespace lro_rrt_server
     }
 
     /** 
+     * @brief is_index_within_octree
+     * Check if the index is within the octree 
+    **/
+    bool lro_rrt_server_node::is_index_within_octree(
+        pcl::octree::OctreeKey idx)
+    {
+        // Check octree boundary
+        if (idx.x < 0 && 
+            idx.x > search_param.m_k[0] &&
+            idx.y < 0 && 
+            idx.y > search_param.m_k[1] &&
+            idx.z < 0 &&
+            idx.z > search_param.m_k[2])
+            return false;
+        else
+            return true;
+    }
+
+    /** 
      * @brief gen_octree_key_for_point
      * Edited from the protected function for octree
      * void pcl::octree::OctreePointCloud<PointT, LeafContainerT, BranchContainerT, OctreeT>::
@@ -903,9 +992,9 @@ namespace lro_rrt_server
         key_arg.y = static_cast<uint8_t>((point_arg.y - search_param.mn_b.y()) / param.r);
         key_arg.z = static_cast<uint8_t>((point_arg.z - search_param.mn_b.z()) / param.r);
         
-        assert(key_arg.x <= search_param.m_k[0]);
-        assert(key_arg.y <= search_param.m_k[1]);
-        assert(key_arg.z <= search_param.m_k[2]);
+        // assert(key_arg.x <= search_param.m_k[0]);
+        // assert(key_arg.y <= search_param.m_k[1]);
+        // assert(key_arg.z <= search_param.m_k[2]);
     }
 
 }
