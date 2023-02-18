@@ -1,5 +1,5 @@
 /*
- * lro_rrt_sampler.h
+ * sampler.h
  *
  * ---------------------------------------------------------------------
  * Copyright (C) 2022 Matthew (matthewoots at gmail.com)
@@ -28,31 +28,18 @@
 * https://github.com/otherlab/pcl/blob/master/test/octree/test_octree.cpp 
 */
 
-#ifndef LRO_RRT_SAMPLER_H
-#define LRO_RRT_SAMPLER_H
+#ifndef LRO_SAMPLER_H
+#define LRO_SAMPLER_H
 
 #include <cmath>
 #include <random>
 #include <math.h>
-#include <queue>
 #include <vector>
 #include <Eigen/Core>
 
-using namespace Eigen;
-using namespace std;
-
-#define KNRM  "\033[0m"
-#define KRED  "\033[31m"
-#define KGRN  "\033[32m"
-#define KYEL  "\033[33m"
-#define KBLU  "\033[34m"
-#define KMAG  "\033[35m"
-#define KCYN  "\033[36m"
-#define KWHT  "\033[37m"
-
-namespace lro_rrt_server
+namespace lro
 {
-    class sampler_node
+    class sampler
     {
         public:
 
@@ -80,7 +67,7 @@ namespace lro_rrt_server
                 double b;
             };
 
-            sampler_node()
+            sampler()
             {
                 std::random_device dev;
                 generator = std::mt19937_64(dev());

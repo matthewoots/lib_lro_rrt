@@ -1,5 +1,5 @@
 /*
- * lro_rrt_server.h
+ * server.h
  *
  * ---------------------------------------------------------------------
  * Copyright (C) 2022 Matthew (matthewoots at gmail.com)
@@ -28,12 +28,10 @@
 * https://github.com/otherlab/pcl/blob/master/test/octree/test_octree.cpp 
 */
 
-#ifndef LRO_RRT_SERVER_H
-#define LRO_RRT_SERVER_H
+#ifndef LRO_SERVER_H
+#define LRO_SERVER_H
 
-#include <iostream>
 #include <cmath>
-#include <random>
 #include <math.h>
 #include <float.h>
 #include <queue>
@@ -45,15 +43,11 @@
 #include <pcl/point_types.h>
 #include <pcl/point_cloud.h>
 
-// #include <pcl/octree/octree.h>
-#include <pcl/octree/octree_search.h>
 #include "kdtree.h"
-#include "lro_rrt_sampler.h"
-#include "lro_rrt_helper.h"
-#include "lro_rrt_struct.h"
+#include "sampler.h"
+#include "helper.h"
+#include "struct.h"
 
-using namespace Eigen;
-using namespace std;
 using namespace std::chrono;
 
 #define KNRM  "\033[0m"
@@ -67,12 +61,11 @@ using namespace std::chrono;
 
 #define EXPANSION 1
 
-typedef time_point<std::chrono::system_clock> t_p_sc; // giving a typename
+typedef std::chrono::time_point<std::chrono::system_clock> t_p_sc; // giving a typename
 
-namespace lro_rrt_server
+namespace lro
 {
-
-    class lro_rrt_server_node
+    class server
     {
         public:
 
@@ -81,36 +74,114 @@ namespace lro_rrt_server
             std::vector<Node*> nodes;
             kdtree *kd_tree;
 
-            std::vector<Eigen::Vector3d> global_path;
             std::vector<Eigen::Vector3d> vertices;
-            std::vector<std::pair<Eigen::Vector3d, Eigen::Vector3d>> edges;
 
             pcl::PointCloud<pcl::PointXYZ>::VectorType occupied_voxels;
 
             /** 
-             * @brief lro_rrt_server_node
-             * Constructor of the RRT node
+             * @brief server
+             * Constructor of the lro server node
             **/ 
-            lro_rrt_server_node()
+            server(double sensor_range, 
+                double resolution, 
+                double scaled_min_dist,
+                double runtime_error,
+                double refinement_time,
+                std::pair<double, double> slh, 
+                std::pair<double, double> slv, 
+                std::pair<double, double> height_range) : 
+                _sensor_range(sensor_range), 
+                _resolution(resolution), 
+                _scaled_min_dist(scaled_min_dist),
+                _runtime_error(runtime_error),
+                _refinement_time(refinement_time),
+                _search_limit_hfov_list(slh), 
+                _search_limit_vfov_list(slv),
+                _height_range(height_range)
             {
+                _octree.setResolution(_resolution);
                 offset_list = create_expanded_list(EXPANSION);
             }
 
             /** 
-             * @brief ~lro_rrt_server_node
-             * Destructor of the RRT node
+             * @brief ~server
+             * Destructor of the lro server node
             **/ 
-            ~lro_rrt_server_node()
+            ~server()
             {
                 _octree.deleteTree();
             }
 
             /** 
-             * @brief get_path
-             * Main run function of the rrt module 
+             * @brief get_search_path
+             * Main run function of the lro module 
             **/ 
-            bool get_path(
+            bool get_search_path(
+                Eigen::Vector3d &start, Eigen::Vector3d &end,
                 vector<Eigen::Vector3d> &output, bool sample_tree);
+
+            /** 
+             * @brief get_spanning_tree
+             * Get the full tree found by the search
+            **/
+            std::vector<std::pair<Eigen::Vector3d, Eigen::Vector3d>> get_tree();
+
+            /** 
+             * @brief set_no_fly_zone
+             * Setup no fly zone limits for the search 
+            **/ 
+            void set_no_fly_zone(
+                std::vector<Eigen::Vector4d> no_fly_zone);
+
+            /** 
+             * @brief update_octree
+             * Update the octree, the octree is centered 
+             * around the pose due to perception range 
+            **/ 
+            void update_octree(
+                pcl::PointCloud<pcl::PointXYZ>::Ptr obs_pcl);
+
+            /** 
+             * @brief check_trajectory_collision
+            **/ 
+            bool check_trajectory_collision(
+                std::vector<Eigen::Vector3d> traj, int &index);
+
+        private:
+
+            std::mutex octree_mutex; 
+
+            double _sensor_range;
+            double _resolution;
+            double _scaled_min_dist;
+            double _runtime_error;
+            double _refinement_time;
+            std::pair<double, double> _search_limit_hfov_list;
+            std::pair<double, double> _search_limit_vfov_list;
+            std::pair<double, double> _height_range;
+
+            /** @param search_param dynamic parameters that vary by instances **/
+            lro::search_parameters search_param;
+
+            std::vector<std::pair<Eigen::Vector3d, Eigen::Vector3d>> edges;
+
+            bool reached = false;
+            bool init = false;
+
+            vector<Eigen::Vector3i> offset_list;
+            
+            /** @param sampler initialize the sampling node **/
+            lro::sampler sampler;
+            
+            /** @param _octree pcl converted octree class **/
+            pcl::octree::OctreePointCloudSearch<pcl::PointXYZ> _octree = 
+                decltype(_octree)(0.1);
+            
+            /** 
+             * @brief create_expanded_list
+            **/ 
+            std::vector<Eigen::Vector3i> 
+                create_expanded_list(int extra);
 
             /** 
              * @brief get_line_validity
@@ -120,103 +191,6 @@ namespace lro_rrt_server
             bool get_line_validity(
                 Eigen::Vector3d p, Eigen::Vector3d q);
 
-            /** 
-             * @brief initialized and deinitialized
-             * To check the initialization of the rrt parameters 
-            **/ 
-            bool initialized() {return init;}
-            void deinitialized() {init = false;}
-
-            /** 
-             * @brief set_parameters
-             * Setup the parameters for the rrt 
-            **/ 
-            void set_parameters(parameters parameter);
-
-            /** 
-             * @brief get_receding_path
-            **/ 
-            void get_receding_path(
-                Eigen::Vector3d point, double distance,
-                std::vector<Eigen::Vector3d> &output)
-            {
-                output.clear();
-
-                double min_dist = FLT_MAX;
-                int index = 0;
-
-                if (global_path.empty())
-                    return;
-                
-                for (size_t i = 1; i < global_path.size(); i++)
-                {
-                    double line_dist;
-                    Eigen::Vector3d v;
-                    get_nearest_distance_to_line(
-                        point, global_path[i-1], global_path[i], 
-                        line_dist, v);
-
-                    if (line_dist < min_dist)
-                    {
-                        index = i;
-                        min_dist = line_dist;
-                    }
-                }
-
-                printf("index %d\n", index);
-
-                std::vector<Eigen::Vector3d> tmp;
-
-                double travel_dist = 0.0, previous;
-                tmp.push_back(point);
-                for (int i = index; i < (int)global_path.size(); i++)
-                {
-                    previous = travel_dist;
-                    travel_dist += 
-                        (tmp.back() - global_path[i]).norm();
-
-                    printf("%d travel_dist %lf/%lf\n", i, 
-                        travel_dist, distance);
-                    if (travel_dist <= distance)
-                        tmp.push_back(global_path[i]);
-                    else
-                    {
-                        Eigen::Vector3d dir_vector = 
-                            (global_path[i] - tmp.back()).normalized();
-                        double leftover = 
-                            abs(previous - distance);
-                        
-                        tmp.push_back(
-                            tmp.back() + dir_vector * leftover);
-                        
-                        break;
-                    }
-                }
-
-                get_discretized_path(tmp, output);
-            }
-
-            /** 
-             * @brief set_no_fly_zone
-             * Setup no fly zone limits for the search 
-            **/ 
-            void set_no_fly_zone(vector<Eigen::Vector4d> no_fly_zone);
-
-            /** 
-             * @brief update_pose_goal
-             * Update the pose and goal
-            **/
-            void update_pose_goal(
-                Eigen::Vector3d p, Eigen::Vector3d q);
-
-            /** 
-             * @brief update_octree
-             * Update the octree, the octree is centered 
-             * around the pose due to perception range 
-            **/ 
-            void update_octree(
-                pcl::PointCloud<pcl::PointXYZ>::Ptr obs_pcl);
-            
             /** 
              * @brief check_approx_intersection_by_segment
              * Checks for intersected voxels that contain pointclouds 
@@ -257,40 +231,6 @@ namespace lro_rrt_server
 
             Node* get_safe_point_in_tree(
                 Node* root, double distance);
-
-            /** 
-             * @brief check_trajectory_collision
-            **/ 
-            bool check_trajectory_collision(
-                std::vector<Eigen::Vector3d> traj, int &index);
-
-        private:
-
-            std::mutex octree_mutex; 
-
-            /** @param param fixed/static parameters for the search **/
-            lro_rrt_server::parameters param;
-
-            /** @param search_param dynamic parameters that vary by instances **/
-            lro_rrt_server::search_parameters search_param;
-
-            bool reached = false;
-            bool init = false;
-
-            vector<Eigen::Vector3i> offset_list;
-            
-            /** @param sampler initialize the sampling node **/
-            lro_rrt_server::sampler_node sampler;
-            
-            /** @param _octree pcl converted octree class **/
-            pcl::octree::OctreePointCloudSearch<pcl::PointXYZ> _octree = 
-                decltype(_octree)(0.1);
-            
-            /** 
-             * @brief create_expanded_list
-            **/ 
-            std::vector<Eigen::Vector3i> 
-                create_expanded_list(int extra);
 
             /** 
              * @brief query_single_node

@@ -1,5 +1,5 @@
 /*
- * lro_rrt_helper.cpp
+ * helper.cpp
  *
  * ---------------------------------------------------------------------
  * Copyright (C) 2022 Matthew (matthewoots at gmail.com)
@@ -28,37 +28,9 @@
 * https://github.com/otherlab/pcl/blob/master/test/octree/test_octree.cpp 
 */
 
-#include <iostream>
-#include <cmath>
-#include <random>
-#include <math.h>
-#include <float.h>
-#include <queue>
-#include <vector>
-#include <chrono>
-#include <mutex>
-#include <Eigen/Core>
+#include "helper.h"
 
-#include <pcl/point_types.h>
-#include <pcl/point_cloud.h>
-
-// #include <pcl/octree/octree.h>
-#include <pcl/octree/octree_search.h>
-#include "lro_rrt_helper.h"
-
-using namespace Eigen;
-using namespace std;
-
-#define KNRM  "\033[0m"
-#define KRED  "\033[31m"
-#define KGRN  "\033[32m"
-#define KYEL  "\033[33m"
-#define KBLU  "\033[34m"
-#define KMAG  "\033[35m"
-#define KCYN  "\033[36m"
-#define KWHT  "\033[37m"
-
-namespace lro_rrt_server
+namespace lro
 {
     /**
      * @brief get_intersection
@@ -124,40 +96,6 @@ namespace lro_rrt_server
             return true;
 
         return false;
-    }
-
-    /** 
-     * @brief get_discretized_path
-     * Discretize the path according their individual legs
-    **/
-    void get_discretized_path(
-        std::vector<Eigen::Vector3d> input, 
-        std::vector<Eigen::Vector3d> &output)
-    {
-        output.clear();
-        std::vector<Eigen::Vector3d> dir_vector;
-        std::vector<double> norm_vector;
-        std::vector<int> seg_vector;
-        
-        for (int i = 1; i < (int)input.size(); i++)
-        {
-            Eigen::Vector3d difference = input[i] - input[i-1];
-            
-            norm_vector.push_back(difference.norm());
-            seg_vector.push_back((int)round(difference.norm() / (0.25)));
-            dir_vector.push_back(difference.normalized());
-        }
-
-        for (int i = 0; i < (int)seg_vector.size(); i++)
-        {
-            double n = norm_vector[i] / (double)seg_vector[i];
-            for (int j = 0; j < seg_vector[i]; j++)
-            {
-                output.push_back(input[i] + dir_vector[i] * n * j);
-            }
-        }
-        
-        output.push_back(input.back());
     }
 
     /** 

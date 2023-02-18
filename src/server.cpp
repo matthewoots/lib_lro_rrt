@@ -1,5 +1,5 @@
 /*
- * lro_rrt_server.cpp
+ * server.cpp
  *
  * ---------------------------------------------------------------------
  * Copyright (C) 2022 Matthew (matthewoots at gmail.com)
@@ -22,18 +22,9 @@
  * 
  */
 
-#define KNRM  "\033[0m"
-#define KRED  "\033[31m"
-#define KGRN  "\033[32m"
-#define KYEL  "\033[33m"
-#define KBLU  "\033[34m"
-#define KMAG  "\033[35m"
-#define KCYN  "\033[36m"
-#define KWHT  "\033[37m"
+#include "server.h"
 
-#include <lro_rrt_server.h>
-
-namespace lro_rrt_server
+namespace lro
 {
     /** 
      * **********************************
@@ -46,40 +37,36 @@ namespace lro_rrt_server
     **/
 
     /** 
-     * @brief get_path
-     * Main run function of the rrt module 
+     * @brief get_search_path
+     * Main run function of the lro module 
     **/ 
-    bool lro_rrt_server_node::get_path(
+    bool server::get_search_path(
+        Eigen::Vector3d &start, Eigen::Vector3d &end,
         vector<Eigen::Vector3d> &output, bool sample_tree)
     {
         std::lock_guard<std::mutex> octree_lock(octree_mutex);
 
         output.clear(); 
-        global_path.clear();       
 
         // Check if we have valid start and end positions given
-        if (search_param.s_e.first.norm() <= 1E-6 && search_param.s_e.second.norm() <= 1E-6)
+        if ((start - end).norm() <= 1E-6)
         {
             std::cout << KRED << "[too close] fail to find path, return false" << KNRM << std::endl;
             return false;
         }
 
         bool valid_p1 = true, valid_p2 = true;
-        if (is_point_within_octree(search_param.s_e.first))
+        if (is_point_within_octree(start))
         {
             pcl::PointXYZ point1(
-                search_param.s_e.first.x(), 
-                search_param.s_e.first.y(), 
-                search_param.s_e.first.z());
+                start.x(), start.y(), start.z());
             valid_p1 = !_octree.isVoxelOccupiedAtPoint(point1);
         }
         
-        if (is_point_within_octree(search_param.s_e.second))
+        if (is_point_within_octree(end))
         {
             pcl::PointXYZ point2(
-                search_param.s_e.second.x(), 
-                search_param.s_e.second.y(), 
-                search_param.s_e.second.z());
+                end.x(), end.y(), end.z());
             valid_p2 = !_octree.isVoxelOccupiedAtPoint(point2);
         }
 
@@ -103,7 +90,7 @@ namespace lro_rrt_server
         }
 
         start_node = new Node;
-        start_node->position = search_param.s_e.first;
+        start_node->position = start;
         start_node->parent = NULL;
         start_node->children.clear();
         start_node->cost_from_start = 0.0;
@@ -111,14 +98,16 @@ namespace lro_rrt_server
         nodes.push_back(start_node);
 
         end_node = new Node;
-        end_node->position = search_param.s_e.second;
+        end_node->position = end;
         end_node->parent = NULL;
         end_node->cost_from_start = FLT_MAX;
         end_node->children.clear();
         
         sampler = {};
         sampler.set_constrained_circle_parameters(
-            search_param.s_e, param.s_d_n, param.s_b, param.s_l_h, param.s_l_v);
+            std::make_pair(start, end), _scaled_min_dist, 
+            _sensor_range, _search_limit_hfov_list, 
+            _search_limit_vfov_list);
 
         time_point<std::chrono::system_clock> fail_timer = system_clock::now();
         
@@ -140,7 +129,6 @@ namespace lro_rrt_server
             double time_offset = 0.0;
             bool set_offset = false;
             
-            // while(!reached)
             while(1)
             {
                 // time_point<std::chrono::system_clock> search_timer = system_clock::now();
@@ -154,13 +142,13 @@ namespace lro_rrt_server
                 if (reached && !set_offset)
                 {
                     time_offset = 
-                        param.r_e - param.r_t -
+                        _runtime_error - _refinement_time -
                         duration<double>(system_clock::now() - fail_sub_timer).count();
                     set_offset = true;
                 }
                 
                 if (duration<double>(system_clock::now() - 
-                    fail_sub_timer).count() + time_offset > param.r_e)
+                    fail_sub_timer).count() + time_offset > _runtime_error)
                     break;
                 
                 iteration++;
@@ -186,8 +174,6 @@ namespace lro_rrt_server
                 ") iterations(" << KBLU << iteration << KNRM << ") path_size(" << 
                 KBLU << output.size()-2 << KNRM << ")" << std::endl;
 
-            global_path = output;
-
             return true;
         }
 
@@ -202,10 +188,7 @@ namespace lro_rrt_server
             safe_node = nullptr;
 
             if (safe_node != nullptr)
-            {
                 output = extract_final_path(safe_node);
-                global_path = output;
-            }
             else
                 std::cout << KRED << 
                     "start_node does not have children" << KNRM << std::endl;
@@ -218,8 +201,6 @@ namespace lro_rrt_server
         nodes.push_back(end_node);
 
         output = extract_final_path(end_node);
-
-        global_path = output;
 
         if (sample_tree)
             sample_whole_tree(start_node);
@@ -238,7 +219,7 @@ namespace lro_rrt_server
      * Check whether the line between the pair of points is 
      * obstacle free 
     **/
-    bool lro_rrt_server_node::get_line_validity(Eigen::Vector3d p, Eigen::Vector3d q)
+    bool server::get_line_validity(Eigen::Vector3d p, Eigen::Vector3d q)
     {
         // Get the translational difference p to q
         Eigen::Vector3d t_d = q - p;
@@ -252,7 +233,7 @@ namespace lro_rrt_server
         Eigen::Vector3d p_fd = p;
         Eigen::Vector3d q_fd = q;
         double dist_counter = 0.0;
-        double step = param.r * 0.9;
+        double step = _resolution * 0.9;
 
         // time_point<std::chrono::system_clock> t_b_t = system_clock::now();
 
@@ -276,23 +257,6 @@ namespace lro_rrt_server
             dist_counter += step;
         }
 
-        // bool l1 = false;
-        // if (check_line_box(search_param.mn_b, search_param.mx_b, 
-        //     p, q, p_fd))
-        //     p_fd += t_d_pq * param.r;
-        // else
-        //     l1 = true;
-        
-        // if (check_line_box(search_param.mn_b, search_param.mx_b, 
-        //     q, p, q_fd))
-        //     q_fd += t_d_qp * param.r;
-        // else
-        //     if (l1) return true;
-
-        // std::cout << "touch_boundary_time = " << KGRN <<
-        //     duration<double>(system_clock::now() - 
-        //     t_b_t).count()*1000 << "ms" << KNRM << std::endl;
-
         if ((q_fd - p_fd).norm() < step)
             return true;
 
@@ -307,26 +271,10 @@ namespace lro_rrt_server
     }
 
     /** 
-     * @brief set_parameters
-     * Setup the parameters for the rrt 
-    **/ 
-    void lro_rrt_server_node::set_parameters(parameters parameter)
-    {
-        // Clean up the previous data
-        param = parameters();
-        // Write to the parameter data
-        param = parameter;
-        // Set the resolution for the octree
-        _octree.setResolution(param.r);
-        // The buffer for the xyz search area determined by the sensor range
-        param.s_b = param.s_bf * param.s_r;
-    }
-
-    /** 
      * @brief set_no_fly_zone
      * Setup no fly zone limits for the search 
     **/
-    void lro_rrt_server_node::set_no_fly_zone(vector<Eigen::Vector4d> no_fly_zone)
+    void server::set_no_fly_zone(vector<Eigen::Vector4d> no_fly_zone)
     {
         // Clean up the previous data
         search_param.n_f_z.clear();
@@ -335,22 +283,11 @@ namespace lro_rrt_server
     }
 
     /** 
-     * @brief update_pose_goal
-     * Update the pose and goal
-    **/
-    void lro_rrt_server_node::update_pose_goal(
-        Eigen::Vector3d p, Eigen::Vector3d q)
-    {   
-        search_param.s_e.first = p;
-        search_param.s_e.second = q;
-    }
-
-    /** 
      * @brief update_octree
      * Update the octree, the octree is centered 
      * around the pose due to perception range 
     **/ 
-    void lro_rrt_server_node::update_octree(
+    void server::update_octree(
         pcl::PointCloud<pcl::PointXYZ>::Ptr obs_pcl)
     {
         std::lock_guard<std::mutex> octree_lock(octree_mutex);
@@ -359,8 +296,6 @@ namespace lro_rrt_server
         
         _octree.setInputCloud(obs_pcl);
         _octree.addPointsFromInputCloud();
-
-        // p_c = obs_pcl;
         
         /** @brief Debug message **/
         // std::cout << "pointcloud size (" << obs_pcl->points.size() << ")" << std::endl;
@@ -377,13 +312,13 @@ namespace lro_rrt_server
         
         search_param.m_k[0] =
             static_cast<uint8_t>(std::ceil(
-            (search_param.mx_b.x() - search_param.mn_b.x() - min_value) / param.r));
+            (search_param.mx_b.x() - search_param.mn_b.x() - min_value) / _resolution));
         search_param.m_k[1] =
             static_cast<uint8_t>(std::ceil(
-            (search_param.mx_b.y() - search_param.mn_b.y() - min_value) / param.r));
+            (search_param.mx_b.y() - search_param.mn_b.y() - min_value) / _resolution));
         search_param.m_k[2] =
             static_cast<uint8_t>(std::ceil(
-            (search_param.mx_b.z() - search_param.mn_b.z() - min_value) / param.r));
+            (search_param.mx_b.z() - search_param.mn_b.z() - min_value) / _resolution));
         
         /** @brief Debug message **/
         // std::cout << "Minimum Boundary = " << KBLU << search_param.mn_b.transpose() << KNRM << " " << 
@@ -397,7 +332,7 @@ namespace lro_rrt_server
      * https://pointclouds.org/documentation/octree__pointcloud_8hpp_source.html#l00269
      * Definition at line 269 of file octree_pointcloud.hpp
     **/ 
-    bool lro_rrt_server_node::check_approx_intersection_by_segment(
+    bool server::check_approx_intersection_by_segment(
         const Eigen::Vector3d origin, const Eigen::Vector3d end, 
         Eigen::Vector3d& intersect)
     {
@@ -468,7 +403,7 @@ namespace lro_rrt_server
      * Check the pairs of points in the path and return whether 
      * the path is still valid
     **/ 
-    bool lro_rrt_server_node::get_path_validity(
+    bool server::get_path_validity(
         std::vector<Eigen::Vector3d> path)
     {
         // If it contains just 1 node which is its current point
@@ -490,7 +425,7 @@ namespace lro_rrt_server
      * @brief create_expanded_list
     **/ 
     std::vector<Eigen::Vector3i> 
-        lro_rrt_server_node::create_expanded_list(int extra)
+        server::create_expanded_list(int extra)
     {
         std::vector<Eigen::Vector3i> out;
         // Setup the neighbouring boxes
@@ -506,7 +441,7 @@ namespace lro_rrt_server
     /** 
      * @brief check_trajectory_collision
     **/ 
-    bool lro_rrt_server_node::check_trajectory_collision(
+    bool server::check_trajectory_collision(
         std::vector<Eigen::Vector3d> traj, int &index)
     {
         if (traj.empty())
@@ -567,26 +502,26 @@ namespace lro_rrt_server
      * void pcl::octree::OctreePointCloud<PointT, LeafContainerT, BranchContainerT, OctreeT>::
      * genLeafNodeCenterFromOctreeKey(const OctreeKey& key, PointT& point) const
     **/
-    void lro_rrt_server_node::gen_leaf_node_center_from_octree_key(
+    void server::gen_leaf_node_center_from_octree_key(
         const pcl::octree::OctreeKey key, pcl::PointXYZ& point)
     {
         // define point to leaf node voxel center
         point.x = static_cast<float>(
             (static_cast<double>(key.x) + 0.5f) * 
-            param.r + search_param.mn_b.x());
+            _resolution + search_param.mn_b.x());
         point.y = static_cast<float>(
             (static_cast<double>(key.y) + 0.5f) * 
-            param.r + search_param.mn_b.y());
+            _resolution + search_param.mn_b.y());
         point.z =static_cast<float>(
             (static_cast<double>(key.z) + 0.5f) * 
-            param.r + search_param.mn_b.z());
+            _resolution + search_param.mn_b.z());
     }
 
     /** 
      * @brief change_node_parent
      * Swap and update the parent node
     **/
-    void lro_rrt_server_node::change_node_parent(
+    void server::change_node_parent(
         Node* &node, Node* &parent, 
         const double &cost_from_parent)
     {
@@ -638,7 +573,7 @@ namespace lro_rrt_server
      * Query a random node found by the sampler and 
      * check for its validity 
     **/
-    void lro_rrt_server_node::query_single_node()
+    void server::query_single_node()
     {
         Node* step_node = new Node;
         Eigen::Vector3d random_vector;
@@ -660,7 +595,8 @@ namespace lro_rrt_server
 
             // Make sure to clamp the height
             random_vector.z() = 
-                min(max(random_vector.z(), param.h_c.first), param.h_c.second);
+                min(max(random_vector.z(), _height_range.first), 
+                _height_range.second);
 
             // Check octree boundary, if it is exit from this loop
             if (!is_point_within_octree(random_vector))
@@ -817,24 +753,6 @@ namespace lro_rrt_server
         }
         kd_res_free(neighbours);
 
-        // if (reached)
-        // {
-        //     std::vector<Eigen::Vector3d> path = 
-        //         extract_final_path(end_node);
-            
-        //     Eigen::Vector3d avg_point = Eigen::Vector3d::Zero();
-        //     for (size_t i = 1; i < path.size()-1; i++)
-        //         avg_point += path[i];
-            
-        //     avg_point = avg_point / ((path.size()-1)-1);
-
-        //     Eigen::Vector3d direction = 
-        //         (avg_point - start_node->position).normalized();
-
-        //     sampler = {};
-        //     sampler.set_constrained_circle_parameters(
-        //         search_param.s_e, param.s_d_n, param.s_b, param.s_l_h, param.s_l_v);
-        // }
     }
 
     /** 
@@ -843,7 +761,7 @@ namespace lro_rrt_server
      * when the goal node is reached
     **/
     std::vector<Eigen::Vector3d> 
-        lro_rrt_server_node::extract_final_path(Node *n)
+        server::extract_final_path(Node *n)
     {
         Node up, down;
         down = *n;
@@ -867,7 +785,7 @@ namespace lro_rrt_server
         return reordered_path;
     }
 
-    void lro_rrt_server_node::sample_whole_tree(Node* &root)
+    void server::sample_whole_tree(Node* &root)
     {
         vertices.clear();
         edges.clear();
@@ -890,7 +808,7 @@ namespace lro_rrt_server
         }
     }
 
-    Node* lro_rrt_server_node::get_safe_point_in_tree(
+    Node* server::get_safe_point_in_tree(
         Node* root, double distance)
     {
         if (root == nullptr)
@@ -944,16 +862,16 @@ namespace lro_rrt_server
      * @brief is_point_within_octree
      * Check if the point is within the octree 
     **/
-    bool lro_rrt_server_node::is_point_within_octree(
+    bool server::is_point_within_octree(
         Eigen::Vector3d point)
     {
         // Check octree boundary
-        if (point.x() < search_param.mx_b.x() - param.r/2 && 
-            point.x() > search_param.mn_b.x() + param.r/2 &&
-            point.y() < search_param.mx_b.y() - param.r/2 && 
-            point.y() > search_param.mn_b.y() + param.r/2 &&
-            point.z() < search_param.mx_b.z() - param.r/2 && 
-            point.z() > search_param.mn_b.z() + param.r/2)
+        if (point.x() < search_param.mx_b.x() - _resolution/2 && 
+            point.x() > search_param.mn_b.x() + _resolution/2 &&
+            point.y() < search_param.mx_b.y() - _resolution/2 && 
+            point.y() > search_param.mn_b.y() + _resolution/2 &&
+            point.z() < search_param.mx_b.z() - _resolution/2 && 
+            point.z() > search_param.mn_b.z() + _resolution/2)
             return true;
         else
             return false;
@@ -963,7 +881,7 @@ namespace lro_rrt_server
      * @brief is_index_within_octree
      * Check if the index is within the octree 
     **/
-    bool lro_rrt_server_node::is_index_within_octree(
+    bool server::is_index_within_octree(
         pcl::octree::OctreeKey idx)
     {
         // Check octree boundary
@@ -984,13 +902,16 @@ namespace lro_rrt_server
      * void pcl::octree::OctreePointCloud<PointT, LeafContainerT, BranchContainerT, OctreeT>::
      * genOctreeKeyforPoint(const PointT& point_arg, OctreeKey& key_arg) const
     **/
-    void lro_rrt_server_node::gen_octree_key_for_point(
+    void server::gen_octree_key_for_point(
         const pcl::PointXYZ point_arg, pcl::octree::OctreeKey& key_arg)
     {
         // calculate integer key for point coordinates
-        key_arg.x = static_cast<uint8_t>((point_arg.x - search_param.mn_b.x()) / param.r);
-        key_arg.y = static_cast<uint8_t>((point_arg.y - search_param.mn_b.y()) / param.r);
-        key_arg.z = static_cast<uint8_t>((point_arg.z - search_param.mn_b.z()) / param.r);
+        key_arg.x = static_cast<uint8_t>((
+            point_arg.x - search_param.mn_b.x()) / _resolution);
+        key_arg.y = static_cast<uint8_t>((
+            point_arg.y - search_param.mn_b.y()) / _resolution);
+        key_arg.z = static_cast<uint8_t>((
+            point_arg.z - search_param.mn_b.z()) / _resolution);
         
         // assert(key_arg.x <= search_param.m_k[0]);
         // assert(key_arg.y <= search_param.m_k[1]);

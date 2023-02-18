@@ -37,7 +37,7 @@
 #define KCYN  "\033[36m"
 #define KWHT  "\033[37m"
 
-using namespace lro_rrt_server;
+using namespace lro;
 using namespace std::this_thread; // sleep_for, sleep_until
 using namespace std::chrono; // nanoseconds, system_clock, seconds
 
@@ -45,8 +45,8 @@ int main()
 {
     std::random_device dev;
     std::mt19937 generator(dev());
-    lro_rrt_server::lro_rrt_server_node rrt;
-    lro_rrt_server::lro_rrt_server_node::parameters rrt_param;
+    lro::server rrt;
+    lro::server::parameters rrt_param;
     double map_size = 20.0 // map_size
     double p_z = 0.3; // protected_zone
     std::pair<double,double> height_constrain{0.0, 5.0};

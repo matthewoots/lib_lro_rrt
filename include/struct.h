@@ -1,5 +1,5 @@
 /*
- * lro_rrt_struct.h
+ * struct.h
  *
  * ---------------------------------------------------------------------
  * Copyright (C) 2022 Matthew (matthewoots at gmail.com)
@@ -28,8 +28,8 @@
 * https://github.com/otherlab/pcl/blob/master/test/octree/test_octree.cpp 
 */
 
-#ifndef LRO_RRT_STRUCT_H
-#define LRO_RRT_STRUCT_H
+#ifndef LRO_STRUCT_H
+#define LRO_STRUCT_H
 
 #include <float.h>
 #include <vector>
@@ -47,7 +47,7 @@ using namespace std;
 #define KCYN  "\033[36m"
 #define KWHT  "\033[37m"
 
-namespace lro_rrt_server
+namespace lro
 {
     struct Node 
     {
@@ -66,37 +66,6 @@ namespace lro_rrt_server
         Node *node;
         bool is_checked;
         bool is_valid;
-    };
-
-    /** 
-    * @brief Global parameters for the RRT setup
-    * @param r_e consist of _runtime_error
-    * @param h_c consist of _min_height and _max_height
-    * @param s_i search_interval
-    * @param s_r sensor_range
-    * @param s_l_h search_limit_hfov
-    * @param s_l_v search_limit_vfov
-    * @param s_d_n scaled_min_dist_from_node
-    * @param r resolution
-    * @param s_bf sensor_buffer_factor
-    * @param s_b sensor_buffer
-    * @param r_t refinement_time
-    **/
-    struct parameters 
-    {
-        // @runtime_error : consist of _runtime_error
-        double r_e; 
-        // @height_constrain : consist of _min_height and _max_height
-        std::pair<double,double> h_c; 
-        double s_i; // @search_interval
-        double s_r; // @sensor_range
-        std::pair<double,double> s_l_h; // @search_limit_hfov
-        std::pair<double,double> s_l_v; // @search_limit_vfov
-        double s_d_n; // @scaled_min_dist_from_node
-        double r; // @resolution
-        double s_bf; // @sensor_buffer_factor
-        double s_b; // @sensor_buffer
-        double r_t; // @refinement_time
     };
 
     /** 

@@ -1,5 +1,5 @@
 /*
- * lro_rrt_helper.h
+ * helper.h
  *
  * ---------------------------------------------------------------------
  * Copyright (C) 2022 Matthew (matthewoots at gmail.com)
@@ -28,29 +28,18 @@
 * https://github.com/otherlab/pcl/blob/master/test/octree/test_octree.cpp 
 */
 
-#ifndef LRO_RRT_HELPER_H
-#define LRO_RRT_HELPER_H
+#ifndef LRO_HELPER_H
+#define LRO_HELPER_H
 
-#include <iostream>
 #include <cmath>
-#include <random>
 #include <math.h>
 #include <float.h>
-#include <queue>
 #include <vector>
-#include <chrono>
-#include <mutex>
 #include <Eigen/Core>
-
-#include <pcl/point_types.h>
-#include <pcl/point_cloud.h>
 
 // #include <pcl/octree/octree.h>
 #include <pcl/octree/octree_search.h>
-#include "lro_rrt_struct.h"
-
-using namespace Eigen;
-using namespace std;
+#include "struct.h"
 
 #define KNRM  "\033[0m"
 #define KRED  "\033[31m"
@@ -61,7 +50,7 @@ using namespace std;
 #define KCYN  "\033[36m"
 #define KWHT  "\033[37m"
 
-namespace lro_rrt_server
+namespace lro
 {
     /**
      * @brief get_intersection
@@ -94,14 +83,6 @@ namespace lro_rrt_server
         Eigen::Vector3d B1, Eigen::Vector3d B2, 
         Eigen::Vector3d L1, Eigen::Vector3d L2, 
         Eigen::Vector3d &Hit);
-
-    /** 
-     * @brief get_discretized_path
-     * Discretize the path according their individual legs
-    **/
-    void get_discretized_path(
-        std::vector<Eigen::Vector3d> input, 
-        std::vector<Eigen::Vector3d> &output);
 
     /** 
      * @brief get_nearest_distance_to_line
