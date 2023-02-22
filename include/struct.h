@@ -70,7 +70,6 @@ namespace lro
 
     /** 
     * @brief Local parameters for an RRT instance
-    * @param s_e start and end pair
     * @param n_f_z no fly zones (minx maxx miny maxy)
     * @param o_p occupied points in the octree
     * @param mn_b minimum boundary for the octree
@@ -79,7 +78,6 @@ namespace lro
     **/
     struct search_parameters 
     {
-        std::pair<Eigen::Vector3d, Eigen::Vector3d> s_e; // start and end pair
         vector<Eigen::Vector4d> n_f_z; // no fly zones (minx maxx miny maxy)
         int o_p; // occupied points in the octree
         Eigen::Vector3d mn_b; // minimum boundary for the octree

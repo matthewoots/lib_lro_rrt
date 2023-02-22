@@ -77,18 +77,6 @@ namespace lro
             return false;
         }
 
-        // Initialize variables for RRT (reset)
-        if (!nodes.empty())
-        {
-            for (size_t i = 0; i < nodes.size(); i++)
-            {
-                /** @brief Debug message **/
-                // printf("deleted %d/%d\n", i, (nodes.size()-1));
-                delete nodes[i];
-            }
-            nodes.clear();
-        }
-
         start_node = new Node;
         start_node->position = start;
         start_node->parent = NULL;
@@ -102,6 +90,9 @@ namespace lro
         end_node->parent = NULL;
         end_node->cost_from_start = FLT_MAX;
         end_node->children.clear();
+
+        // std::cout << "start: " << start.transpose() << 
+        //     " end: " << end.transpose() << std::endl;
         
         sampler = {};
         sampler.set_constrained_circle_parameters(
@@ -155,7 +146,7 @@ namespace lro
             }
 
             /** @brief Debug message **/
-            std::cout << "iterations(" << KBLU <<
+            std::cout << "[lro] iterations(" << KBLU <<
                 iteration << KNRM << ")" << std::endl;
         }
         // When there are no points in the cloud
@@ -165,47 +156,47 @@ namespace lro
             end_node->parent = start_node;
             nodes.push_back(end_node);
 
-            std::cout << (reached ? "Successful" : "Unsuccessful") << " search complete after " << 
+            std::cout << "[lro] " << (reached ? "successful" : "unsuccessful") << " search complete after " << 
                 duration<double>(system_clock::now() - fail_timer).count()*1000 << "ms" << std::endl;
 
-            output = extract_final_path(end_node);
+            output = extract_final_path(end_node, start);
 
-            std::cout << "intermediate_nodes(" << KBLU << nodes.size() - 2 << KNRM
+            std::cout << "[lro] " << "intermediate_nodes(" << KBLU << nodes.size() - 2 << KNRM
                 ") iterations(" << KBLU << iteration << KNRM << ") path_size(" << 
                 KBLU << output.size()-2 << KNRM << ")" << std::endl;
 
             return true;
         }
 
-        std::cout << (reached ? "Successful" : "Unsuccessful") << " search complete after " << 
+        std::cout << "[lro] " << (reached ? "Successful" : "Unsuccessful") << " search complete after " << 
             duration<double>(system_clock::now() - fail_timer).count()*1000 << "ms" << std::endl;
 
         if (!reached)
         {
             Node *safe_node = new Node;
-            std::cout << KRED << "[use safe path] fail to find path, return false" << KNRM << std::endl;
+            std::cout << "[lro] " << KRED << "[use safe path] fail to find path, return false" << KNRM << std::endl;
             // safe_node = get_safe_point_in_tree(start_node, 4.0);
             safe_node = nullptr;
 
             if (safe_node != nullptr)
-                output = extract_final_path(safe_node);
+                output = extract_final_path(safe_node, start);
             else
-                std::cout << KRED << 
+                std::cout << "[lro] " << KRED << 
                     "start_node does not have children" << KNRM << std::endl;
                 
-            std::cout << KRED << "extract last safe path" << KNRM << std::endl;
+            std::cout << "[lro] " << KRED << "extract last safe path" << KNRM << std::endl;
 
             return false;
         }
 
         nodes.push_back(end_node);
 
-        output = extract_final_path(end_node);
+        output = extract_final_path(end_node, start);
 
         if (sample_tree)
             sample_whole_tree(start_node);
 
-        std::cout << "intermediate_nodes(" << KBLU << nodes.size() - 2 << KNRM
+        std::cout << "[lro] " << "intermediate_nodes(" << KBLU << nodes.size() - 2 << KNRM
             ") iterations(" << KBLU << iteration << KNRM << ") path_size(" << 
             KBLU << output.size()-2 << KNRM << ")" << std::endl;
 
@@ -268,6 +259,15 @@ namespace lro
         return check_approx_intersection_by_segment(
             p_fd, q_fd, intersect);
         
+    }
+
+    /** 
+     * @brief get_tree
+     * Get the full spanning tree found by the search
+    **/
+    std::vector<std::pair<Eigen::Vector3d, Eigen::Vector3d>> server::get_tree()
+    {
+        return edges;
     }
 
     /** 
@@ -761,7 +761,7 @@ namespace lro
      * when the goal node is reached
     **/
     std::vector<Eigen::Vector3d> 
-        server::extract_final_path(Node *n)
+        server::extract_final_path(Node *n, Eigen::Vector3d &start)
     {
         Node up, down;
         down = *n;
@@ -776,7 +776,7 @@ namespace lro
             up = *(up.parent);
             down = *(down.parent);
         }
-        path.push_back(search_param.s_e.first);
+        path.push_back(start);
 
         std::vector<Eigen::Vector3d> reordered_path;
         for (int i = (int)path.size()-1; i >= 0; i--)

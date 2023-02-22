@@ -121,8 +121,8 @@ namespace lro
                 vector<Eigen::Vector3d> &output, bool sample_tree);
 
             /** 
-             * @brief get_spanning_tree
-             * Get the full tree found by the search
+             * @brief get_tree
+             * Get the full spanning tree found by the search
             **/
             std::vector<std::pair<Eigen::Vector3d, Eigen::Vector3d>> get_tree();
 
@@ -245,7 +245,7 @@ namespace lro
              * when the goal node is reached
             **/
             std::vector<Eigen::Vector3d> 
-                extract_final_path(Node *n);
+                extract_final_path(Node *n, Eigen::Vector3d &start);
 
             /** 
              * @brief is_point_within_octree
